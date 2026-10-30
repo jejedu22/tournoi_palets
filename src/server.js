@@ -22,6 +22,15 @@ export function createApp(db) {
     return recent.length >= 10;
   };
 
+  // Derrière Traefik (TRUST_PROXY=1) : Traefik ajoute l'IP réelle en dernière position de X-Forwarded-For.
+  const clientIp = (req) => {
+    if (process.env.TRUST_PROXY === '1') {
+      const last = String(req.headers['x-forwarded-for'] || '').split(',').pop().trim();
+      if (last) return last;
+    }
+    return req.socket.remoteAddress;
+  };
+
   const hasUsers = () => db.prepare('SELECT 1 FROM users LIMIT 1').get() !== undefined;
   const redirect = (res, to, extra = {}) => {
     res.writeHead(303, { Location: to, ...extra });
@@ -48,6 +57,12 @@ export function createApp(db) {
   // Un tournoi n'est jamais lu sans filtre sur l'association de l'utilisateur connecté.
   const loadTournament = (session, id) =>
     db.prepare('SELECT * FROM tournaments WHERE id = ? AND association_id = ?').get(Number(id), session.association_id);
+
+  route('GET', '/healthz', null, ({ res }) => {
+    db.prepare('SELECT 1').get();
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+  });
 
   // ---------- Premier lancement / connexion ----------
   route('GET', '/setup', null, ({ res, url }) => {
@@ -77,7 +92,7 @@ export function createApp(db) {
     }));
   });
   route('POST', '/login', null, ({ req, res, body, secure }) => {
-    const ip = req.socket.remoteAddress;
+    const ip = clientIp(req);
     if (tooManyFailures(ip)) return back(res, '/login', 'err', 'Trop de tentatives, réessayez dans quelques minutes.');
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get((body.email || '').trim().toLowerCase());
     const ok = verifyPassword(body.password || '', (user ?? { password_hash: DUMMY_HASH }).password_hash) && user;

@@ -13,6 +13,22 @@ npm test
 Au premier lancement, `/setup` demande la création du **super-administrateur**.
 Derrière un proxy HTTPS, définir `COOKIE_SECURE=1`.
 
+## Déploiement (Docker + Traefik)
+
+```bash
+echo "DOMAIN=palets.exemple.fr" > .env     # + CERT_RESOLVER (défaut : letsencrypt), TRAEFIK_NETWORK (défaut : traefik)
+docker compose up -d --build
+```
+
+- Le conteneur rejoint le réseau Docker externe de Traefik et est exposé en HTTPS (entrypoint `websecure`,
+  port interne 3000). Adaptez `CERT_RESOLVER`, `TRAEFIK_NETWORK` et le nom de l'entrypoint à votre Traefik.
+- La base SQLite est dans le volume `palets-data` (`/data/tournoi.db`) : pensez à la sauvegarder.
+- `TRUST_PROXY=1` (déjà dans le compose) fait lire l'IP réelle dans `X-Forwarded-For` pour la limitation des
+  essais de connexion ; à ne l'activer que si l'application n'est joignable que via Traefik.
+- `COOKIE_SECURE=1` réserve le cookie de session au HTTPS. Santé : `GET /healthz`.
+- Au premier accès, ouvrir `https://<DOMAIN>/setup` pour créer le super-administrateur : faites-le tout de suite,
+  la page est publique tant qu'aucun compte n'existe.
+
 ## Fonctionnement
 
 - **Super-administrateur** : crée les associations et leurs administrateurs.

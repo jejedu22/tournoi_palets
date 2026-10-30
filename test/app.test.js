@@ -131,3 +131,25 @@ test('échappement HTML des noms', async () => {
     assert.ok(page.text.includes('&lt;script&gt;'));
   } finally { close(); }
 });
+
+test('healthz et limitation des connexions par IP derrière un proxy', async () => {
+  const { server, client, close } = await boot();
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const c = client();
+    const r = await c.call('GET', '/healthz');
+    assert.equal(r.status, 200);
+    assert.equal(r.text, 'ok');
+
+    await c.call('POST', '/setup', { name: 'R', email: 'r@x.fr', password: 'motdepasse1' });
+    process.env.TRUST_PROXY = '1';
+    const login = (ip, password) => fetch(`${base}/login`, {
+      method: 'POST', redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-forwarded-for': `9.9.9.9, ${ip}` },
+      body: new URLSearchParams({ email: 'r@x.fr', password }),
+    }).then((x) => decodeURIComponent(x.headers.get('location')));
+    for (let i = 0; i < 10; i++) assert.match(await login('1.1.1.1', 'mauvais'), /incorrects/);
+    assert.match(await login('1.1.1.1', 'motdepasse1'), /Trop de tentatives/); // IP bloquée
+    assert.equal(await login('2.2.2.2', 'motdepasse1'), '/');                  // une autre IP n'est pas touchée
+  } finally { delete process.env.TRUST_PROXY; close(); }
+});
