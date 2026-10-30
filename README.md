@@ -1,7 +1,8 @@
 # Tournois de palets bretons
 
 Application web de gestion de tournois de palets, multi-associations.
-Aucune dépendance npm : Node.js ≥ 22.13 (serveur HTTP natif + `node:sqlite`).
+Aucune dépendance npm : Node.js ≥ 22.13 (serveur HTTP natif + `node:sqlite`). Seule bibliothèque tierce, intégrée
+telle quelle : le générateur de QR code (voir `src/vendor/README.md`).
 
 ## Lancer
 
@@ -34,8 +35,9 @@ docker compose up -d --build
 Chaque tournoi a une page publique en lecture seule (`/r/<jeton>`), sans compte : poules, tableaux, consolante
 et podium, rechargés automatiquement dès qu'un score est enregistré. Chaque joueur peut y choisir son équipe
 (mémorisée sur son téléphone) pour la voir mise en avant, ou n'afficher que ses matchs de poule.
-Depuis la page du tournoi (bloc « Partager »), l'organisateur copie le lien, peut désactiver la page ou changer
-le lien (l'ancien cesse alors de fonctionner). Le jeton est aléatoire et la page est exclue des moteurs de
+Depuis la page du tournoi (bloc « Partager »), l'organisateur affiche le **QR code** du lien, imprime une **affiche A4**
+à mettre sur place, copie le lien, peut désactiver la page ou changer le lien (l'ancien cesse alors de fonctionner).
+Les joueurs peuvent aussi se repasser la page par QR code (« Partager cette page »). Le jeton est aléatoire et la page est exclue des moteurs de
 recherche. `PUBLIC_URL` (facultatif) fixe l'adresse utilisée pour construire le lien.
 
 ## Application installable (PWA)

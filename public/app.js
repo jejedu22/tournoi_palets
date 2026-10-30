@@ -232,3 +232,8 @@ document.addEventListener('click', (e) => {
   if (a && a.getAttribute('href') === location.hash) setTimeout(openTarget); // même ancre : pas de hashchange
 });
 openTarget();
+
+// Affiche : bouton d'impression
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-print]')) window.print();
+});

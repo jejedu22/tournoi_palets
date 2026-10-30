@@ -17,7 +17,7 @@ const formatDate = (iso) => {
     : d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 };
 
-export function layout({ title, session, flash, body, nav, live, homeHref }) {
+export function layout({ title, session, flash, body, nav, live, homeHref, bodyClass }) {
   const home = session?.role === 'superadmin' ? '/associations' : '/tournois';
   return html`<!doctype html>
 <html lang="fr"><head>
@@ -34,7 +34,7 @@ ${live ? html`<meta name="robots" content="noindex, nofollow">` : ''}
 <link rel="stylesheet" href="${asset('app.css')}">
 <script src="${asset('app.js')}" defer></script>
 </head>
-<body>
+<body class="${bodyClass ?? ''}">
 <header class="topbar">
   <a class="brand" href="${homeHref ?? (session ? home : '/')}"><img src="${asset('icon.svg')}" alt="" width="40" height="40">
     <span class="wordmark">Palets</span><span class="sticker tilt">Breizh</span></a>
@@ -329,7 +329,7 @@ function donePools(s, poolTables) {
   </details>`;
 }
 
-export function tournamentPage({ session, flash, t, teams, matches, poolTables, publicLink }) {
+export function tournamentPage({ session, flash, t, teams, matches, poolTables, publicLink, publicQr }) {
   const s = summarize(t, teams, matches);
   const { names, poolMatches, main, cons, poolsDone, perPool } = s;
   const tabs = [...sectionTabs(t, s), ['equipes', '👥 Équipes'], ['partage', '📣 Partager']];
@@ -386,13 +386,19 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables, 
     <section id="partage" class="card share">
       <h2>📣 Résultats en direct pour les joueurs</h2>
       ${t.public_enabled ? html`
-        <p class="muted">Partagez ce lien (SMS, réseaux, affichage sur place) : les joueurs suivent les poules, les tableaux
-          et le podium sans compte, avec une mise à jour automatique à chaque score enregistré.</p>
-        <div class="copy-row">
-          <input id="public-link" readonly value="${publicLink}" aria-label="Lien de la page publique">
-          <button type="button" class="btn-teal" data-copy="#public-link">📋 Copier</button>
+        <div class="share-grid">
+          <div class="qr-box">${raw(publicQr)}</div>
+          <div>
+            <p class="muted">Les joueurs scannent ce QR code ou ouvrent le lien (SMS, réseaux…) : ils suivent les poules,
+              les tableaux et le podium sans compte, avec une mise à jour automatique à chaque score enregistré.</p>
+            <div class="copy-row">
+              <input id="public-link" readonly value="${publicLink}" aria-label="Lien de la page publique">
+              <button type="button" class="btn-teal" data-copy="#public-link">📋 Copier</button>
+            </div>
+          </div>
         </div>
         <div class="row">
+          <a class="btn btn-yellow" href="/tournois/${t.id}/affiche" target="_blank" rel="noopener">🖨️ Affiche à imprimer</a>
           <a class="btn btn-ghost" href="${publicLink}" target="_blank" rel="noopener">👀 Voir la page publique</a>
           <form method="post" action="/tournois/${t.id}/public">${csrf(session)}<input type="hidden" name="action" value="disable">
             <button class="btn-ghost">🙈 Désactiver</button></form>
@@ -420,7 +426,7 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables, 
 
 // ---------- Page publique (joueurs, sans connexion) ----------
 
-export function publicPage({ t, teams, matches, poolTables, version, isAdmin }) {
+export function publicPage({ t, teams, matches, poolTables, version, isAdmin, publicLink, qr }) {
   const s = summarize(t, teams, matches);
   const { names, main, cons } = s;
   const self = `/r/${t.public_token}`;
@@ -454,6 +460,36 @@ export function publicPage({ t, teams, matches, poolTables, version, isAdmin }) 
 
     ${main.length ? html`<section id="tableau"><h2>🏆 Phase finale</h2><div class="card">${bracketView(null, t, main, names, false)}</div></section>` : ''}
     ${cons.length ? html`<section id="consolante"><h2>🤝 Consolante</h2><div class="card">${bracketView(null, t, cons, names, false)}</div></section>` : ''}
-    ${t.status === 'finals' ? donePools(s, poolTables) : ''}`,
+    ${t.status === 'finals' ? donePools(s, poolTables) : ''}
+
+    <details class="card more share-public"><summary>📲 Partager cette page</summary>
+      <div class="share-grid">
+        <div class="qr-box">${raw(qr)}</div>
+        <div><p class="muted">Faites scanner ce QR code à un autre joueur, ou envoyez-lui le lien.</p>
+          <div class="copy-row"><input id="public-link" readonly value="${publicLink}" aria-label="Lien de cette page">
+            <button type="button" class="btn-teal" data-copy="#public-link">📋 Copier</button></div></div>
+      </div>
+    </details>`,
+  });
+}
+
+// ---------- Affiche à imprimer ----------
+
+export function posterPage({ session, t, association, publicLink, qr }) {
+  return layout({
+    title: `Affiche · ${t.name}`, session, bodyClass: 'poster-page',
+    body: html`<div class="poster-tools no-print">
+      <a class="back" href="/tournois/${t.id}#partage">← Retour au tournoi</a>
+      <button type="button" class="btn-yellow" data-print>🖨️ Imprimer</button>
+    </div>
+    <article class="poster">
+      <p class="kicker">${association.name}</p>
+      <h1>${t.name}</h1>
+      ${t.date ? html`<p class="poster-date">📅 ${formatDate(t.date)}</p>` : ''}
+      <div class="poster-qr">${raw(qr)}</div>
+      <p class="poster-call">📲 Scannez pour suivre <strong>les résultats en direct</strong></p>
+      <p class="poster-sub">Poules, tableaux, consolante et podium · sans inscription</p>
+      <p class="poster-url">${publicLink}</p>
+    </article>`,
   });
 }
