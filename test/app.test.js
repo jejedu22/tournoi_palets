@@ -51,11 +51,13 @@ test('parcours complet + isolation entre associations', async () => {
     // un admin d'association ne peut pas gérer les associations
     assert.equal((await admA.call('GET', '/associations')).status, 403);
 
-    // création d'un tournoi : 8 équipes, 2 poules, demi-finales, consolante
+    // création d'un tournoi : 8 équipes, 2 poules, 2 premiers qualifiés → demi-finales, consolante
     t = await admA.token('/tournois/nouveau');
-    const bad = await admA.call('POST', '/tournois', { _csrf: t, name: 'X', nb_teams: 4, nb_pools: 2, finals_rounds: 3 });
+    const bad = await admA.call('POST', '/tournois', { _csrf: t, name: 'X', nb_teams: 4, nb_pools: 2, qualifiers_per_pool: 2, fill_mode: 'best' });
     assert.equal(bad.status, 400);
-    const created = await admA.call('POST', '/tournois', { _csrf: t, name: 'Open de Brest', date: '2026-11-01', nb_teams: 8, nb_pools: 2, finals_rounds: 2, consolante: '1' });
+    assert.match(bad.text, /au plus 1 par poule/);
+    const created = await admA.call('POST', '/tournois', { _csrf: t, name: 'Open de Brest', date: '2026-11-01', nb_teams: 8, nb_pools: 2,
+      qualifiers_per_pool: 2, fill_mode: 'best', consolante: '1' });
     const tid = /\/tournois\/(\d+)/.exec(created.location)[1];
 
     // isolation : l'association B ne voit ni ne modifie le tournoi de A
@@ -118,6 +120,40 @@ test('parcours complet + isolation entre associations', async () => {
   } finally { close(); }
 });
 
+test('format choisi : 3 poules, 2 premiers qualifiés, exemptions ou repêchage', async () => {
+  const { db, client, close } = await boot();
+  try {
+    const root = client();
+    await root.call('POST', '/setup', { name: 'R', email: 'r@x.fr', password: 'motdepasse1' });
+    await root.call('POST', '/login', { email: 'r@x.fr', password: 'motdepasse1' });
+    let t = await root.token('/associations');
+    await root.call('POST', '/associations', { _csrf: t, name: 'Club' });
+    const aid = db.prepare('SELECT id FROM associations').get().id;
+    await root.call('POST', `/associations/${aid}/admins`, { _csrf: t, name: 'A', email: 'a@x.fr', password: 'motdepasse1' });
+    const adm = client();
+    await adm.call('POST', '/login', { email: 'a@x.fr', password: 'motdepasse1' });
+
+    for (const [fill, firstRoundMatches, byes, cons] of [['bye', 4, 2, 6], ['best', 4, 0, 4]]) {
+      t = await adm.token('/tournois/nouveau');
+      const r = await adm.call('POST', '/tournois', { _csrf: t, name: `T-${fill}`, nb_teams: 12, nb_pools: 3, qualifiers_per_pool: 2, fill_mode: fill, consolante: '1' });
+      const tid = Number(/\/tournois\/(\d+)/.exec(r.location)[1]);
+      await adm.call('POST', `/tournois/${tid}/poules`, { _csrf: t });
+      for (const m of db.prepare("SELECT id FROM matches WHERE tournament_id = ? AND phase = 'pool'").all(tid)) {
+        await adm.call('POST', `/tournois/${tid}/matchs/${m.id}`, { _csrf: t, score1: 13, score2: m.id % 12 });
+      }
+      await adm.call('POST', `/tournois/${tid}/finales`, { _csrf: t });
+      const round1 = db.prepare("SELECT * FROM matches WHERE tournament_id = ? AND phase = 'main' AND round = 1").all(tid);
+      assert.equal(round1.length, firstRoundMatches, fill);           // quarts de finale dans les deux cas
+      assert.equal(round1.filter((m) => m.bye).length, byes, fill);
+      const inMain = new Set(round1.flatMap((m) => [m.team1_id, m.team2_id]).filter(Boolean));
+      assert.equal(inMain.size, 8 - byes, fill);
+      const consTeams = db.prepare("SELECT team1_id, team2_id FROM matches WHERE tournament_id = ? AND phase = 'consolante' AND round = 1").all(tid)
+        .flatMap((m) => [m.team1_id, m.team2_id]).filter(Boolean);
+      assert.equal(consTeams.length, cons, fill);
+    }
+  } finally { close(); }
+});
+
 test('échappement HTML des noms', async () => {
   const { db, client, close } = await boot();
   try {
@@ -152,4 +188,38 @@ test('healthz et limitation des connexions par IP derrière un proxy', async () 
     assert.match(await login('1.1.1.1', 'motdepasse1'), /Trop de tentatives/); // IP bloquée
     assert.equal(await login('2.2.2.2', 'motdepasse1'), '/');                  // une autre IP n'est pas touchée
   } finally { delete process.env.TRUST_PROXY; close(); }
+});
+
+test('PWA : manifeste, service worker, fichiers statiques et CSP', async () => {
+  const { server, close } = await boot();
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const login = await fetch(`${base}/login`, { redirect: 'manual' });
+    assert.match(login.headers.get('content-security-policy'), /script-src 'self'/);
+
+    const setup = await (await fetch(`${base}/setup`)).text();
+    assert.match(setup, /<link rel="manifest" href="\/manifest.webmanifest">/);
+    const css = /href="(\/static\/app\.css\?v=[0-9a-f]+)"/.exec(setup)[1];
+
+    const manifest = await fetch(`${base}/manifest.webmanifest`);
+    assert.equal(manifest.headers.get('content-type'), 'application/manifest+json');
+    const m = await manifest.json();
+    assert.equal(m.display, 'standalone');
+    assert.ok(m.icons.some((i) => i.sizes === '512x512' && i.purpose === 'maskable'));
+    assert.ok(!JSON.stringify(m).includes('__VERSION__'));
+    for (const icon of m.icons) assert.equal((await fetch(base + icon.src)).status, 200, icon.src);
+
+    const sw = await fetch(`${base}/sw.js`);
+    assert.equal(sw.headers.get('cache-control'), 'no-cache');
+    assert.match(sw.headers.get('content-type'), /javascript/);
+    assert.ok(!(await sw.text()).includes('__VERSION__'));
+
+    const cssRes = await fetch(base + css);
+    assert.equal(cssRes.status, 200);
+    assert.match(cssRes.headers.get('cache-control'), /immutable/);
+    assert.equal((await fetch(`${base}/offline.html`)).status, 200);
+
+    assert.equal((await fetch(`${base}/static/inconnu.js`, { redirect: 'manual' })).status, 404);
+    assert.notEqual((await fetch(`${base}/static/..%2Fpackage.json`, { redirect: 'manual' })).status, 200);
+  } finally { close(); }
 });

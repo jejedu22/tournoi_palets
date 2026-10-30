@@ -1,13 +1,8 @@
 // Logique pure des tournois : poules, classements, tableaux à élimination directe.
 // Aucune dépendance à la base ni au serveur, pour être facile à tester.
 
-export const ROUND_OPTIONS = [
-  { value: 1, label: 'Finale uniquement (2 équipes)' },
-  { value: 2, label: 'Demi-finales (4 équipes)' },
-  { value: 3, label: 'Quarts de finale (8 équipes)' },
-  { value: 4, label: 'Huitièmes de finale (16 équipes)' },
-  { value: 5, label: 'Seizièmes de finale (32 équipes)' },
-];
+export const FILL_MODES = { best: 'Repêcher les meilleurs suivants', bye: 'Exempter les mieux classés' };
+export const MAX_PER_POOL = 4;
 
 export function roundName(matchesInRound) {
   switch (matchesInRound) {
@@ -27,29 +22,59 @@ export function poolSizes(nbTeams, nbPools) {
   return Array.from({ length: nbPools }, (_, i) => base + (i < extra ? 1 : 0));
 }
 
+const nextPow2 = (n) => { let p = 1; while (p < n) p *= 2; return p; };
+
+/**
+ * Format de la phase finale à partir du nombre de qualifiés par poule.
+ * Si le total n'est pas une puissance de 2 : `best` repêche les meilleurs (k+1)ᵉ pour compléter
+ * le tableau, `bye` exempte du premier tour les têtes de série les mieux classées.
+ */
+export function finalsFormat({ nbTeams, nbPools, perPool, fill }) {
+  const direct = perPool * nbPools;
+  const size = nextPow2(direct);
+  const extra = fill === 'best' ? size - direct : 0;
+  const qualified = direct + extra;
+  return { direct, extra, size, rounds: Math.log2(size), qualified, eliminated: nbTeams - qualified, byes: size - qualified };
+}
+
+/** Format d'un tournoi enregistré (les tournois créés avant le choix des qualifiés par poule en déduisaient le nombre). */
+export function tournamentFormat(t) {
+  if (t.qualifiers_per_pool == null) {
+    const size = 2 ** t.finals_rounds;
+    const perPool = Math.floor(size / t.nb_pools);
+    const direct = perPool * t.nb_pools;
+    return { perPool, fill: 'best', direct, extra: size - direct, size, rounds: t.finals_rounds,
+      qualified: size, eliminated: t.nb_teams - size, byes: 0 };
+  }
+  const perPool = t.qualifiers_per_pool, fill = t.fill_mode;
+  return { perPool, fill, ...finalsFormat({ nbTeams: t.nb_teams, nbPools: t.nb_pools, perPool, fill }) };
+}
+
 /**
  * Vérifie la configuration d'un tournoi. Retourne un message d'erreur (fr) ou null.
  */
-export function validateConfig({ nbTeams, nbPools, finalsRounds, consolante }) {
-  if (![nbTeams, nbPools, finalsRounds].every(Number.isInteger)) return 'Valeurs numériques invalides.';
+export function validateConfig({ nbTeams, nbPools, perPool, fill, consolante }) {
+  if (![nbTeams, nbPools, perPool].every(Number.isInteger)) return 'Valeurs numériques invalides.';
   if (nbTeams < 2 || nbTeams > 128) return "Le nombre d'équipes doit être compris entre 2 et 128.";
   if (nbPools < 1 || nbPools > 32) return 'Le nombre de poules doit être compris entre 1 et 32.';
   if (nbTeams < nbPools * 2) return 'Il faut au moins 2 équipes par poule.';
-  if (finalsRounds < 1 || finalsRounds > 5) return 'Phase finale invalide.';
+  if (perPool < 1 || perPool > MAX_PER_POOL) return `Le nombre de qualifiés par poule doit être compris entre 1 et ${MAX_PER_POOL}.`;
+  if (!(fill in FILL_MODES)) return 'Choisissez comment compléter le tableau final.';
 
-  const qualified = 2 ** finalsRounds;
-  if (qualified > nbTeams) {
-    return `La phase finale choisie nécessite ${qualified} équipes qualifiées, mais il n'y a que ${nbTeams} équipes.`;
-  }
   const sizes = poolSizes(nbTeams, nbPools);
-  const perPool = Math.floor(qualified / nbPools);
-  const remainder = qualified - perPool * nbPools;
-  if (sizes.some((s) => s < perPool)) return 'Certaines poules sont trop petites pour le nombre de qualifiés requis.';
-  if (remainder > sizes.filter((s) => s > perPool).length) {
-    return 'Impossible de désigner les meilleurs suivants : réduisez la phase finale ou le nombre de poules.';
+  const minSize = Math.min(...sizes);
+  if (perPool >= minSize) {
+    return `Les plus petites poules ont ${minSize} équipes : qualifiez-en au plus ${minSize - 1} par poule.`;
   }
-  if (consolante && nbTeams - qualified < 2) {
-    return 'Consolante impossible : il faut au moins 2 équipes éliminées en poule (réduisez la phase finale).';
+  const f = finalsFormat({ nbTeams, nbPools, perPool, fill });
+  if (f.direct < 2) return 'Il faut au moins 2 équipes qualifiées : augmentez le nombre de qualifiés par poule.';
+  if (f.size > 64) return 'Tableau final trop grand (64 équipes maximum).';
+  // Chaque poule a un (perPool+1)ᵉ (perPool < minSize) : on peut repêcher au plus une équipe par poule.
+  if (f.extra > nbPools) {
+    return `Il faudrait repêcher ${f.extra} équipes pour ${nbPools} poule(s) : choisissez plutôt les exemptions.`;
+  }
+  if (consolante && f.eliminated < 2) {
+    return 'Consolante impossible : il faut au moins 2 équipes éliminées en poule.';
   }
   return null;
 }
@@ -122,19 +147,15 @@ const compareRows = (x, y) => y.wins - x.wins || y.diff - x.diff || y.pf - x.pf 
 /**
  * À partir des classements de chaque poule (tableaux de lignes triées), retourne
  * { qualified: [ids ordonnés par tête de série], eliminated: [ids ordonnés par force] }.
- * On prend les k premiers de chaque poule puis, s'il manque des places, les meilleurs (k+1)ᵉ.
+ * On prend les `perPool` premiers de chaque poule puis, si `extra` > 0, les meilleurs (perPool+1)ᵉ.
  */
-export function selectQualifiers(poolStandings, count) {
-  const nbPools = poolStandings.length;
-  const perPool = Math.floor(count / nbPools);
-  const remainder = count - perPool * nbPools;
-
-  const bestThirds = poolStandings
+export function selectQualifiers(poolStandings, perPool, extra = 0) {
+  const repechage = poolStandings
     .map((p) => p[perPool])
     .filter(Boolean)
     .sort(compareRows)
-    .slice(0, remainder);
-  const extraIds = new Set(bestThirds.map((r) => r.id));
+    .slice(0, extra);
+  const extraIds = new Set(repechage.map((r) => r.id));
 
   const order = (filterFn) => {
     const maxLen = Math.max(...poolStandings.map((p) => p.length));

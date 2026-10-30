@@ -35,6 +35,8 @@ export function openDb(path = process.env.DB_PATH || 'data/tournoi.db') {
       nb_pools INTEGER NOT NULL,
       finals_rounds INTEGER NOT NULL,
       consolante INTEGER NOT NULL DEFAULT 0,
+      qualifiers_per_pool INTEGER,
+      fill_mode TEXT CHECK (fill_mode IN ('best', 'bye')),
       status TEXT NOT NULL DEFAULT 'setup' CHECK (status IN ('setup', 'pools', 'finals')),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
@@ -62,9 +64,14 @@ export function openDb(path = process.env.DB_PATH || 'data/tournoi.db') {
     CREATE INDEX IF NOT EXISTS idx_tournaments_assoc ON tournaments(association_id);
     CREATE INDEX IF NOT EXISTS idx_matches_tournament ON matches(tournament_id);
   `);
-  // Migration des bases créées avant la petite finale
-  if (!db.prepare('PRAGMA table_info(matches)').all().some((c) => c.name === 'third')) {
-    db.exec('ALTER TABLE matches ADD COLUMN third INTEGER NOT NULL DEFAULT 0');
-  }
+  // Migrations des bases existantes (colonnes ajoutées après coup)
+  const addColumn = (table, column, definition) => {
+    if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    }
+  };
+  addColumn('matches', 'third', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn('tournaments', 'qualifiers_per_pool', 'INTEGER');
+  addColumn('tournaments', 'fill_mode', "TEXT CHECK (fill_mode IN ('best', 'bye'))");
   return db;
 }
