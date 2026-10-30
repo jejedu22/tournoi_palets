@@ -38,7 +38,7 @@ ${live ? html`<meta name="robots" content="noindex, nofollow">` : ''}
 <body class="${bodyClass ?? ''}">
 <header class="topbar">
   <a class="brand" href="${homeHref ?? (session ? home : '/')}"><img src="${asset('icon.svg')}" alt="" width="40" height="40">
-    <span class="wordmark">Palets Bretons</span></a>
+    <span class="wordmark">Palets</span><span class="sticker">Breizh</span></a>
   ${session ? html`<nav aria-label="Navigation principale">
     <a href="${home}" ${raw(nav === 'home' ? 'aria-current="page"' : '')}>${session.role === 'superadmin' ? 'Associations' : 'Tournois'}</a>
   </nav>` : ''}
@@ -48,13 +48,14 @@ ${live ? html`<meta name="robots" content="noindex, nofollow">` : ''}
     <span class="who"><span class="avatar" aria-hidden="true">${initial(session.name)}</span><span class="name">${session.name}</span></span>
     <form method="post" action="/logout">${csrf(session)}<button class="btn btn-ghost btn-sm">Déconnexion</button></form>` : ''}
 </header>
+<div class="stripes" aria-hidden="true"></div>
 <main ${raw(live ? html`data-live="${live.url}" data-version="${live.version}"`.toString() : '')}>
 ${flash ? html`<div class="flash ${flash.type}" role="${flash.type === 'err' ? 'alert' : 'status'}">
   <p>${flash.message}</p>
   <button type="button" data-dismiss aria-label="Fermer le message">✕</button></div>` : ''}
 ${body}
 </main>
-<footer class="page-footer">Palets Bretons · gestion de tournois</footer>
+<footer class="page-footer">Palets Bretons · fait pour les planches 💛</footer>
 </body></html>`;
 }
 
@@ -141,7 +142,7 @@ export function associationPage({ session, flash, association, admins }) {
     <h1>${association.name}</h1>
     <div class="grid">
       <section class="card">
-        <h2>Administrateurs</h2>
+        <h2>👥 Administrateurs</h2>
         ${admins.length ? html`<ul class="people">${admins.map((u) => html`<li>
           <span class="avatar" aria-hidden="true">${initial(u.name)}</span>
           <span class="grow"><strong>${u.name}</strong><br><span class="muted">${u.email}</span></span>
@@ -177,7 +178,7 @@ export function tournamentsPage({ session, flash, association, tournaments }) {
     body: html`<div class="hero">
       <div><p class="kicker">${association.name}</p><h1>Tournois</h1>
         <p class="muted">Créez un tournoi, tirez les poules au sort et suivez les scores en direct.</p></div>
-      <a class="btn btn-big" href="/tournois/nouveau">Nouveau tournoi</a>
+      <a class="btn btn-yellow btn-big" href="/tournois/nouveau">Nouveau tournoi</a>
     </div>
     ${tournaments.length ? html`<div class="grid">${tournaments.map((t) => html`<a class="card tile" href="/tournois/${t.id}">
       <div class="row">${statusSticker(t.status)}${t.date ? html`<span class="meta">${formatDate(t.date)}</span>` : ''}</div>
@@ -264,7 +265,7 @@ function bracketView(session, t, all, names, editable = true) {
     const ms = matches.filter((m) => m.round === r).sort((x, y) => x.pos - y.pos);
     return html`<div class="col"><h3>${roundName(ms.length)}</h3><div class="col-body">${ms.map((m) => bracketMatch(m, names, editable))}</div></div>`;
   })}</div></div>
-  ${third ? html`<div class="third"><h3>Petite finale (3ᵉ place)</h3>${bracketMatch(third, names, editable)}</div>` : ''}`;
+  ${third ? html`<div class="third"><h3>🥉 Petite finale</h3>${bracketMatch(third, names, editable)}</div>` : ''}`;
   return editable ? scoresForm(session, t, content) : content;
 }
 
@@ -330,7 +331,7 @@ function overview(t, s, { kicker } = {}) {
     ${real.length ? html`<div class="progress"><div class="progress-label"><span>Matchs joués</span><span>${played}/${real.length}</span></div>
       <progress max="${real.length}" value="${played}">${played}/${real.length}</progress></div>` : ''}
 
-    ${champion ? html`<section class="card"><h2>Podium</h2>
+    ${champion ? html`<section class="card"><h2>🎉 Podium</h2>
       <div class="podium">
         <div class="p2" data-team="${runnerUp}"><div class="who-won">${names.get(runnerUp)}</div><div class="step">🥈</div></div>
         <div class="p1" data-team="${champion}"><div class="who-won">${names.get(champion)}</div><div class="step">🥇</div></div>
@@ -345,15 +346,15 @@ const legend = (s) => html`<p class="legend">★ qualifié directement pour la p
 
 // Onglets : une fois les poules terminées, la phase finale passe devant
 function sectionTabs(t, s) {
-  const pools = t.status !== 'setup' ? [['poules', t.status === 'finals' ? 'Poules (terminées)' : 'Poules']] : [];
-  const finals = [...(s.main.length ? [['tableau', 'Tableau']] : []), ...(s.cons.length ? [['consolante', 'Consolante']] : [])];
+  const pools = t.status !== 'setup' ? [['poules', t.status === 'finals' ? '🎱 Poules (terminées)' : '🎱 Poules']] : [];
+  const finals = [...(s.main.length ? [['tableau', '🏆 Tableau']] : []), ...(s.cons.length ? [['consolante', '🤝 Consolante']] : [])];
   return t.status === 'finals' ? [...finals, ...pools] : [...pools, ...finals];
 }
 
 // Phase de poules terminée : repliée sous la phase finale, consultable d'un clic
 function donePools(s, poolTables) {
   return html`<details id="poules" class="card pools-done">
-    <summary><span class="summary-title">Phase de poules</span><span class="sticker s-setup">Terminée</span>
+    <summary><span class="summary-title">🎱 Phase de poules</span><span class="sticker s-setup">Terminée</span>
       <span class="summary-hint">Voir les classements et les scores</span></summary>
     ${legend(s)}
     ${poolCards({ poolTables, names: s.names, perPool: s.perPool, editable: false })}
@@ -363,11 +364,11 @@ function donePools(s, poolTables) {
 export function tournamentPage({ session, flash, t, teams, matches, poolTables, publicLink, publicQr }) {
   const s = summarize(t, teams, matches);
   const { names, poolMatches, main, cons, poolsDone, perPool } = s;
-  const tabs = [...sectionTabs(t, s), ['equipes', 'Équipes'], ['partage', 'Partager']];
+  const tabs = [...sectionTabs(t, s), ['equipes', '👥 Équipes'], ['partage', '📣 Partager']];
   // Aux inscriptions en tête de page ; en phase finale, repliée en bas avec les poules
   const teamsSection = html`<section id="equipes">
       ${t.status === 'setup' ? html`<div class="card">
-        <h2>Équipes</h2>
+        <h2>👥 Équipes</h2>
         <p class="muted">Saisissez ou collez la liste des ${teams.length} équipes, enregistrez, puis lancez le tirage au sort.</p>
         <form method="post" action="/tournois/${t.id}/equipes/liste">${csrf(session)}
           <label for="liste">Une équipe par ligne</label>
@@ -381,8 +382,8 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables, 
               <input id="team${x.id}" name="team_${x.id}" value="${x.name}" required maxlength="80"></div>`)}</div>
             <p><button class="btn-ghost">Enregistrer les noms</button></p></form></details>
         <form method="post" action="/tournois/${t.id}/poules">${csrf(session)}
-          <button class="btn-big">Tirer au sort les poules</button></form>
-      </div>` : html`<details class="card more"><summary>Équipes (renommer)</summary>
+          <button class="btn-yellow btn-big">🎲 Tirer au sort les poules</button></form>
+      </div>` : html`<details class="card more"><summary>👥 Équipes (renommer)</summary>
         <form method="post" action="/tournois/${t.id}/equipes">${csrf(session)}
           <div class="form-grid">${teams.map((x, i) => html`<div><label for="team${x.id}">Équipe ${i + 1}</label>
             <input id="team${x.id}" name="team_${x.id}" value="${x.name}" required maxlength="80"></div>`)}</div>
@@ -398,7 +399,7 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables, 
 
     ${t.status !== 'finals' ? teamsSection : ''}
 
-    ${t.status === 'pools' ? html`<section id="poules"><h2>Phase de poules</h2>
+    ${t.status === 'pools' ? html`<section id="poules"><h2>🎱 Phase de poules</h2>
       ${legend(s)}
       ${scoresForm(session, t, poolCards({ poolTables, names, perPool, editable: true }))}
       <form class="card" method="post" action="/tournois/${t.id}/finales">${csrf(session)}
@@ -406,16 +407,16 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables, 
         ${poolsDone ? html`<p>Toutes les poules sont terminées. Place au tableau final${t.consolante ? ' et à la consolante' : ''} !</p>`
           : html`<p class="muted">Les phases finales se débloquent quand tous les matchs de poule sont joués
             (${poolMatches.filter((m) => m.score1 == null).length} restant(s)).</p>`}
-        <button class="btn-big" ${raw(poolsDone ? '' : 'disabled')}>Générer les phases finales</button></form>
+        <button class="btn-yellow btn-big" ${raw(poolsDone ? '' : 'disabled')}>Générer les phases finales</button></form>
     </section>` : ''}
 
-    ${main.length ? html`<section id="tableau"><h2>Phase finale</h2><div class="card">${bracketView(session, t, main, names)}</div></section>` : ''}
-    ${cons.length ? html`<section id="consolante"><h2>Consolante</h2><div class="card">${bracketView(session, t, cons, names)}</div></section>` : ''}
+    ${main.length ? html`<section id="tableau"><h2>🏆 Phase finale</h2><div class="card">${bracketView(session, t, main, names)}</div></section>` : ''}
+    ${cons.length ? html`<section id="consolante"><h2>🤝 Consolante</h2><div class="card">${bracketView(session, t, cons, names)}</div></section>` : ''}
     ${t.status === 'finals' ? donePools(s, poolTables) : ''}
     ${t.status === 'finals' ? teamsSection : ''}
 
     <section id="partage" class="card share">
-      <h2>Résultats en direct pour les joueurs</h2>
+      <h2>📣 Résultats en direct pour les joueurs</h2>
       ${t.public_enabled ? html`
         <div class="share-grid">
           <div class="qr-box">${raw(publicQr)}</div>
@@ -474,7 +475,7 @@ export function publicPage({ t, teams, matches, poolTables, version, isAdmin, pu
 
     <section class="card my-team" data-my-team-box hidden>
       <div class="form-grid">
-        <div><label for="my-team">Suivre mon équipe</label>
+        <div><label for="my-team">⭐ Suivre mon équipe</label>
           <select id="my-team" data-my-team="${t.public_token}"><option value="">— Choisir une équipe —</option>
             ${sorted.map((x) => html`<option value="${x.id}">${x.name}</option>`)}</select></div>
         <label class="switch"><input type="checkbox" data-only-mine><span>Afficher seulement ses matchs de poule</span></label>
@@ -486,14 +487,14 @@ export function publicPage({ t, teams, matches, poolTables, version, isAdmin, pu
     ${t.status === 'setup' ? html`<section class="card empty">
       <h2>Le tirage au sort n'a pas encore eu lieu</h2><p>Les poules apparaîtront ici dès qu'il sera fait.</p>
       <ul class="team-list">${sorted.map((x) => html`<li data-team="${x.id}">${x.name}</li>`)}</ul></section>`
-    : t.status === 'pools' ? html`<section id="poules"><h2>Phase de poules</h2>${legend(s)}
+    : t.status === 'pools' ? html`<section id="poules"><h2>🎱 Phase de poules</h2>${legend(s)}
       ${poolCards({ poolTables, names, perPool: s.perPool, editable: false })}</section>` : ''}
 
-    ${main.length ? html`<section id="tableau"><h2>Phase finale</h2><div class="card">${bracketView(null, t, main, names, false)}</div></section>` : ''}
-    ${cons.length ? html`<section id="consolante"><h2>Consolante</h2><div class="card">${bracketView(null, t, cons, names, false)}</div></section>` : ''}
+    ${main.length ? html`<section id="tableau"><h2>🏆 Phase finale</h2><div class="card">${bracketView(null, t, main, names, false)}</div></section>` : ''}
+    ${cons.length ? html`<section id="consolante"><h2>🤝 Consolante</h2><div class="card">${bracketView(null, t, cons, names, false)}</div></section>` : ''}
     ${t.status === 'finals' ? donePools(s, poolTables) : ''}
 
-    <details class="card more share-public"><summary>Partager cette page</summary>
+    <details class="card more share-public"><summary>📲 Partager cette page</summary>
       <div class="share-grid">
         <div class="qr-box">${raw(qr)}</div>
         <div><p class="muted">Faites scanner ce QR code à un autre joueur, ou envoyez-lui le lien.</p>
