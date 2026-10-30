@@ -45,8 +45,8 @@ ${live ? html`<meta name="robots" content="noindex, nofollow">` : ''}
   <span class="spacer"></span>
   <button type="button" class="btn btn-ghost btn-sm install" data-install hidden>Installer l'application</button>
   ${session ? html`
-    <span class="who"><span class="avatar" aria-hidden="true">${initial(session.name)}</span><span class="name">${session.name}</span></span>
-    <form method="post" action="/logout">${csrf(session)}<button class="btn btn-ghost btn-sm">Déconnexion</button></form>` : ''}
+    <a class="who" href="/compte" title="Mon compte" ${raw(nav === 'account' ? 'aria-current="page"' : '')}><span class="avatar" aria-hidden="true">${initial(session.name)}</span><span class="name">${session.name}</span></a>
+    <form class="logout" method="post" action="/logout">${csrf(session)}<button class="btn btn-ghost btn-sm">Déconnexion</button></form>` : ''}
 </header>
 <div class="stripes" aria-hidden="true"></div>
 <main ${raw(live ? html`data-live="${live.url}" data-version="${live.version}"`.toString() : '')}>
@@ -523,5 +523,40 @@ export function posterPage({ session, t, association, publicLink, qr }) {
       <p class="poster-sub">Poules, tableaux, consolante et podium · sans inscription</p>
       <p class="poster-url">${publicLink}</p>
     </article>`,
+  });
+}
+
+// ---------- Mon compte ----------
+
+export function accountPage({ session, flash, association }) {
+  const role = session.role === 'superadmin' ? 'Super-administrateur' : `Administrateur · ${association?.name ?? ''}`;
+  return layout({
+    title: 'Mon compte', session, flash, nav: 'account',
+    body: html`<h1>Mon compte</h1>
+    <div class="grid">
+      <section class="card">
+        <h2>👤 Profil</h2>
+        <dl class="profile">
+          <dt>Nom</dt><dd>${session.name}</dd>
+          <dt>E-mail (identifiant)</dt><dd>${session.email}</dd>
+          <dt>Rôle</dt><dd>${role}</dd>
+        </dl>
+      </section>
+      <section class="card">
+        <h2>🔑 Changer de mot de passe</h2>
+        <form method="post" action="/compte/mot-de-passe">${csrf(session)}
+          <input type="email" name="email" value="${session.email}" autocomplete="username" hidden>
+          <label for="current">Mot de passe actuel</label>
+          <input id="current" name="current" type="password" autocomplete="current-password" required>
+          <label for="password">Nouveau mot de passe (8 caractères min.)</label>
+          <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+          <label for="confirm">Confirmez le nouveau mot de passe</label>
+          <input id="confirm" name="confirm" type="password" autocomplete="new-password" minlength="8" required>
+          <p class="hint">Vos autres sessions ouvertes (autres appareils) seront déconnectées.</p>
+          <p><button>Enregistrer le mot de passe</button></p>
+        </form>
+      </section>
+    </div>
+    <form class="account-logout" method="post" action="/logout">${csrf(session)}<button class="btn-ghost">Se déconnecter</button></form>`,
   });
 }

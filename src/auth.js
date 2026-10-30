@@ -69,3 +69,10 @@ export function resetPassword(db, userId, password) {
   db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(userId);
   db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
 }
+
+/** Changement par l'utilisateur connecté : ses autres sessions sont fermées, la session en cours est conservée. */
+export function changePassword(db, userId, password, currentSessionToken) {
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), userId);
+  db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(userId);
+  db.prepare('DELETE FROM sessions WHERE user_id = ? AND token <> ?').run(userId, currentSessionToken);
+}

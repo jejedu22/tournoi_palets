@@ -378,6 +378,8 @@ body.only-mine .match:not(.mine) { display: none; }
 @media (max-width: 520px) {
   .topbar { gap: .5rem; }
   .who .name, .topbar .label { display: none; }
+  /* sur téléphone, la déconnexion se fait depuis « Mon compte » (avatar) */
+  .topbar form.logout { display: none; }
   .bracket .col { width: 210px; }
   .match { gap: .3rem; padding: .4rem; font-size: .9rem; }
   .score-form input { width: 2.5rem; }
@@ -392,3 +394,12 @@ body.only-mine .match:not(.mine) { display: none; }
 .people li { flex-wrap: wrap; }
 .people .grow { flex: 1 1 12rem; }
 .people li form { margin: 0; }
+
+/* ---------- Mon compte ---------- */
+a.who { text-decoration: none; padding: .15rem .55rem .15rem .2rem; border-radius: 999px; }
+a.who:hover, a.who[aria-current="page"] { background: var(--subtle); color: var(--ink); }
+.profile { display: grid; grid-template-columns: max-content 1fr; gap: .45rem 1rem; margin: 0; }
+.profile dt { color: var(--muted); font-size: .9rem; }
+.profile dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+@media (max-width: 520px) { .profile { grid-template-columns: 1fr; gap: .1rem; } .profile dd { margin-bottom: .5rem; } }
+.account-logout { margin-top: 1.25rem; }

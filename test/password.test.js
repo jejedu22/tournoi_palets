@@ -243,3 +243,50 @@ test('sendMail refuse les en-têtes et adresses invalides', async () => {
     await assert.rejects(sendMail({ to: 'a@b.fr', subject: 'x', text: 'x' }), /SMTP non configuré/);
   });
 });
+
+test('changer son propre mot de passe (« Mon compte »)', async () => {
+  const { db, client, close } = await boot();
+  try {
+    assert.equal((await client().call('GET', '/compte')).location, '/login');
+
+    const me = client(), otherDevice = client();
+    await me.call('POST', '/login', { email: 'maiwenn@x.fr', password: 'ancienmotdepasse' });
+    await otherDevice.call('POST', '/login', { email: 'maiwenn@x.fr', password: 'ancienmotdepasse' });
+    const page = await me.call('GET', '/compte');
+    assert.equal(page.status, 200);
+    assert.ok(page.text.includes('maiwenn@x.fr') && page.text.includes('Club A') && page.text.includes('href="/compte"'));
+    const t = /name="_csrf" value="([0-9a-f]+)"/.exec(page.text)[1];
+    const change = (form) => me.call('POST', '/compte/mot-de-passe', { _csrf: t, ...form }).then((r) => decodeURIComponent(r.location));
+    const stillOld = async () => (await client().call('POST', '/login', { email: 'maiwenn@x.fr', password: 'ancienmotdepasse' })).location === '/';
+
+    // jeton CSRF obligatoire
+    assert.equal((await me.call('POST', '/compte/mot-de-passe', { current: 'ancienmotdepasse', password: 'xxxxxxxxxx', confirm: 'xxxxxxxxxx' })).status, 403);
+    assert.match(await change({ current: 'faux', password: 'nouveaumotdepasse', confirm: 'nouveaumotdepasse' }), /actuel est incorrect/);
+    assert.match(await change({ current: 'ancienmotdepasse', password: 'court', confirm: 'court' }), /au moins 8 caractères/);
+    assert.match(await change({ current: 'ancienmotdepasse', password: 'nouveaumotdepasse', confirm: 'autre-chose' }), /ne correspondent pas/);
+    assert.match(await change({ current: 'ancienmotdepasse', password: 'ancienmotdepasse', confirm: 'ancienmotdepasse' }), /différent de l'actuel/);
+    assert.ok(await stillOld());
+
+    // un lien de réinitialisation en cours sera annulé
+    const pending = await import('../src/auth.js').then((m) => m.createResetToken(db, 2, 60_000));
+    assert.match(await change({ current: 'ancienmotdepasse', password: 'nouveaumotdepasse', confirm: 'nouveaumotdepasse' }), /ok=Mot de passe modifié/);
+    assert.equal(findResetUser(db, pending), null);
+    assert.equal((await me.call('GET', '/tournois')).status, 200);               // session en cours conservée
+    assert.equal((await otherDevice.call('GET', '/tournois')).location, '/login'); // autres sessions fermées
+    assert.ok(!(await stillOld()));
+    assert.equal((await client().call('POST', '/login', { email: 'maiwenn@x.fr', password: 'nouveaumotdepasse' })).location, '/');
+
+    // après 5 mots de passe actuels erronés (1 plus haut + 4 ici), même le bon est refusé un moment
+    for (let i = 0; i < 4; i++) assert.match(await change({ current: `faux${i}`, password: 'encoreunautre1', confirm: 'encoreunautre1' }), /actuel est incorrect/);
+    assert.match(await change({ current: 'nouveaumotdepasse', password: 'encoreunautre1', confirm: 'encoreunautre1' }), /Trop de tentatives/);
+    assert.equal((await client().call('POST', '/login', { email: 'maiwenn@x.fr', password: 'nouveaumotdepasse' })).location, '/');
+
+    // le super-administrateur aussi
+    const root = client();
+    await root.call('POST', '/login', { email: 'root@x.fr', password: 'motdepasse1' });
+    const rt = await root.token('/compte');
+    assert.match((await root.call('GET', '/compte')).text, /Super-administrateur/);
+    const r = await root.call('POST', '/compte/mot-de-passe', { _csrf: rt, current: 'motdepasse1', password: 'motdepasse2', confirm: 'motdepasse2' });
+    assert.match(decodeURIComponent(r.location), /ok=Mot de passe modifié/);
+  } finally { close(); }
+});

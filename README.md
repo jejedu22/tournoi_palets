@@ -41,6 +41,9 @@ docker compose up -d --build
 - **Super-administrateur** : en cas d'oubli, un lien s'obtient sur le serveur :
   `docker compose exec palets node src/cli.js lien-reinitialisation <e-mail>`.
 
+Chacun peut aussi changer son mot de passe depuis **Mon compte** (clic sur son nom ou son avatar) : le mot de passe
+actuel est demandé, les essais erronés sont limités, et les autres sessions ouvertes du compte sont fermées.
+
 Une réinitialisation ferme toutes les sessions ouvertes du compte. Seule l'empreinte des jetons est stockée en base.
 
 ## Résultats en direct pour les joueurs

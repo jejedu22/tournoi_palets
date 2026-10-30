@@ -3,7 +3,7 @@ import { timingSafeEqual, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { openDb, newPublicToken } from './db.js';
 import { hashPassword, verifyPassword, createSession, getSession, destroySession,
-  createResetToken, findResetUser, resetPassword, RESET_TTL_EMAIL_MS, RESET_TTL_MANUAL_MS } from './auth.js';
+  createResetToken, findResetUser, resetPassword, changePassword, RESET_TTL_EMAIL_MS, RESET_TTL_MANUAL_MS } from './auth.js';
 import { sendMail, mailConfigured } from './mail.js';
 import { validateConfig, finalsFormat, tournamentFormat, drawPools, roundRobin, standings, selectQualifiers, buildBracket } from './logic.js';
 import * as v from './views.js';
@@ -40,21 +40,29 @@ export function createApp(db) {
     return req.socket.remoteAddress;
   };
 
-  // Limite générique : au plus `max` actions par clé (IP, e-mail…) sur la fenêtre donnée
+  // Limite générique : au plus `max` actions par clé (IP, e-mail…) sur la fenêtre donnée.
+  // limiter(key) enregistre une action et indique si la limite était atteinte ; limiter.blocked(key) consulte sans enregistrer.
   const rateLimiter = (windowMs, max) => {
     const hits = new Map();
-    return (key) => {
+    const recent = (key) => {
       const now = Date.now();
-      if (hits.size > 5000) for (const [k, ts] of hits) if (now - ts[ts.length - 1] > windowMs) hits.delete(k);
-      const recent = (hits.get(key) || []).filter((t) => now - t < windowMs);
-      const blocked = recent.length >= max;
-      if (!blocked) recent.push(now);
-      hits.set(key, recent);
+      if (hits.size > 5000) for (const [k, ts] of hits) if (!ts.length || now - ts[ts.length - 1] > windowMs) hits.delete(k);
+      const list = (hits.get(key) || []).filter((t) => now - t < windowMs);
+      hits.set(key, list);
+      return list;
+    };
+    const limiter = (key) => {
+      const list = recent(key);
+      const blocked = list.length >= max;
+      if (!blocked) list.push(Date.now());
       return blocked;
     };
+    limiter.blocked = (key) => recent(key).length >= max;
+    return limiter;
   };
   const resetByIp = rateLimiter(15 * 60_000, 5);
   const resetByEmail = rateLimiter(60 * 60_000, 3);
+  const wrongCurrentPassword = rateLimiter(15 * 60_000, 5); // par compte : mot de passe actuel erroné
 
   // Le lien envoyé par e-mail est construit uniquement à partir de PUBLIC_URL, jamais de l'en-tête Host :
   // sinon un attaquant pourrait faire envoyer à sa victime un lien vers son propre site et voler le jeton.
@@ -207,6 +215,32 @@ export function createApp(db) {
     redirect(res, '/login', { 'Set-Cookie': 'sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0' });
   });
   route('GET', '/', 'any', ({ res, session }) => redirect(res, session.role === 'superadmin' ? '/associations' : '/tournois'));
+
+  // ---------- Mon compte ----------
+  route('GET', '/compte', 'any', ({ res, url, session }) => {
+    const association = session.association_id
+      ? db.prepare('SELECT name FROM associations WHERE id = ?').get(session.association_id) : null;
+    send(res, 200, v.accountPage({ session, flash: flashOf(url), association }));
+  });
+
+  route('POST', '/compte/mot-de-passe', 'any', ({ res, session, body }) => {
+    const path = '/compte';
+    const user = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(session.user_id);
+    const password = String(body.password || '');
+    // Bloqué avant toute vérification : sinon une bonne réponse passerait malgré la limite
+    if (wrongCurrentPassword.blocked(session.user_id)) {
+      return back(res, path, 'err', 'Trop de tentatives : réessayez dans quelques minutes, ou utilisez « Mot de passe oublié ».');
+    }
+    if (!verifyPassword(String(body.current || ''), user.password_hash)) {
+      wrongCurrentPassword(session.user_id);
+      return back(res, path, 'err', 'Le mot de passe actuel est incorrect.');
+    }
+    if (password.length < 8) return back(res, path, 'err', 'Le nouveau mot de passe doit contenir au moins 8 caractères.');
+    if (password !== body.confirm) return back(res, path, 'err', 'Les deux nouveaux mots de passe ne correspondent pas.');
+    if (password === body.current) return back(res, path, 'err', "Le nouveau mot de passe doit être différent de l'actuel.");
+    changePassword(db, session.user_id, password, session.token);
+    back(res, path, 'ok', 'Mot de passe modifié. Vos autres sessions ouvertes ont été déconnectées.');
+  });
 
   // ---------- Super-administrateur : associations ----------
   route('GET', '/associations', 'superadmin', ({ res, url, session }) => {
