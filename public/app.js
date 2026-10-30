@@ -43,30 +43,38 @@ const form = document.querySelector('[data-tournament-form]');
 if (form) {
   const out = form.querySelector('[data-preview]');
   const sizes = (n, p) => Array.from({ length: p }, (_, i) => Math.floor(n / p) + (i < n % p ? 1 : 0));
+  const roundName = (m) => ({ 1: 'la finale', 2: 'demi-finales', 4: 'quarts de finale', 8: 'huitièmes de finale', 16: 'seizièmes de finale' }[m] || `tour de ${m * 2}`);
   const update = () => {
     const n = parseInt(form.nb_teams.value, 10);
     const p = parseInt(form.nb_pools.value, 10);
-    const rounds = parseInt(form.querySelector('[name=finals_rounds]:checked')?.value, 10);
+    const k = parseInt(form.querySelector('[name=qualifiers_per_pool]:checked')?.value, 10);
+    const fill = form.querySelector('[name=fill_mode]:checked')?.value;
     const cons = form.consolante.checked;
     const items = [];
     let error = null;
     if (!(n >= 2) || !(p >= 1)) error = 'Renseignez le nombre d’équipes et de poules.';
     else if (n < 2 * p) error = 'Il faut au moins 2 équipes par poule.';
-    else if (2 ** rounds > n) error = `Cette phase finale demande ${2 ** rounds} équipes qualifiées : il n’y en a que ${n}.`;
     if (!error) {
       const s = sizes(n, p);
-      const q = 2 ** rounds;
-      const perPool = Math.floor(q / p);
-      const extra = q - perPool * p;
-      const matches = s.reduce((acc, k) => acc + (k * (k - 1)) / 2, 0);
       const min = Math.min(...s), max = Math.max(...s);
-      if (extra > s.filter((k) => k > perPool).length) error = 'Pas assez d’équipes pour compléter le tableau : réduisez la phase finale.';
-      else if (cons && n - q < 2) error = 'Consolante impossible : il faut au moins 2 équipes éliminées en poule.';
+      const direct = k * p;
+      let size = 1; while (size < direct) size *= 2;
+      const extra = fill === 'best' ? size - direct : 0;
+      const byes = size - direct - extra;
+      const eliminated = n - direct - extra;
+      if (k >= min) error = `Les plus petites poules ont ${min} équipes : qualifiez-en au plus ${min - 1} par poule.`;
+      else if (direct < 2) error = 'Il faut au moins 2 qualifiés : augmentez le nombre de qualifiés par poule.';
+      else if (size > 64) error = 'Tableau final trop grand (64 équipes maximum).';
+      else if (extra > p) error = `Il faudrait repêcher ${extra} équipes pour ${p} poule(s) : choisissez plutôt les exemptions.`;
+      else if (cons && eliminated < 2) error = 'Consolante impossible : il faut au moins 2 équipes éliminées en poule.';
       else {
-        items.push(`${p} poule${p > 1 ? 's' : ''} de ${min === max ? min : `${min} à ${max}`} équipes`);
-        items.push(`${matches} matchs de poule`);
-        items.push(`${perPool} qualifié${perPool > 1 ? 's' : ''} par poule${extra ? ` + ${extra} meilleur${extra > 1 ? 's' : ''} ${perPool + 1}ᵉ` : ''} → ${q} en phase finale`);
-        if (cons) items.push(`${n - q} équipes en consolante`);
+        const matches = s.reduce((acc, x) => acc + (x * (x - 1)) / 2, 0);
+        items.push(`${p} poule${p > 1 ? 's' : ''} de ${min === max ? min : `${min} à ${max}`} équipes · ${matches} matchs de poule`);
+        items.push(`${k === 1 ? 'Le 1er' : `Les ${k} premiers`} de chaque poule qualifiés → ${direct} équipes`);
+        if (extra) items.push(`+ ${extra} meilleur${extra > 1 ? 's' : ''} ${k + 1}ᵉ repêché${extra > 1 ? 's' : ''} pour compléter le tableau`);
+        if (byes) items.push(`${byes} tête${byes > 1 ? 's' : ''} de série exemptée${byes > 1 ? 's' : ''} du premier tour`);
+        items.push(`Phase finale à partir des ${roundName(size / 2)} (tableau de ${size})`.replace('des la finale', 'de la finale'));
+        if (cons) items.push(`${eliminated} équipes en consolante`);
       }
     }
     out.classList.toggle('bad', Boolean(error));

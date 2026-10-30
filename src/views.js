@@ -1,5 +1,5 @@
 import { html, raw } from './html.js';
-import { ROUND_OPTIONS, roundName } from './logic.js';
+import { FILL_MODES, MAX_PER_POOL, roundName, tournamentFormat } from './logic.js';
 import { ASSET_VERSION } from './static.js';
 
 const asset = (name) => `/static/${name}?v=${ASSET_VERSION}`;
@@ -162,7 +162,7 @@ export function tournamentsPage({ session, flash, association, tournaments }) {
 }
 
 export function newTournamentPage({ session, flash, values = {} }) {
-  const v = { nb_teams: 16, nb_pools: 4, finals_rounds: 2, ...values };
+  const v = { nb_teams: 16, nb_pools: 4, qualifiers_per_pool: 2, fill_mode: 'best', ...values };
   return layout({
     title: 'Nouveau tournoi', session, flash,
     body: html`<a class="back" href="/tournois">← Mes tournois</a>
@@ -174,11 +174,16 @@ export function newTournamentPage({ session, flash, values = {} }) {
         <div><label for="nb_teams">Nombre d'équipes</label><input id="nb_teams" name="nb_teams" type="number" inputmode="numeric" min="2" max="128" required value="${v.nb_teams}"></div>
         <div><label for="nb_pools">Nombre de poules</label><input id="nb_pools" name="nb_pools" type="number" inputmode="numeric" min="1" max="32" required value="${v.nb_pools}"></div>
       </div>
-      <fieldset><legend>Phase finale à partir des…</legend>
-        <div class="choices">${ROUND_OPTIONS.map((o) => {
-          const [label, detail] = o.label.split(' (');
-          return html`<label class="choice"><input type="radio" name="finals_rounds" value="${o.value}" ${raw(Number(v.finals_rounds) === o.value ? 'checked' : '')}>
-            <span>${label.replace(' uniquement', '').replace(' de finale', '')}<small>${detail.replace(')', '')}</small></span></label>`;
+      <fieldset><legend>Qualifiés pour la phase finale, dans chaque poule</legend>
+        <div class="choices">${Array.from({ length: MAX_PER_POOL }, (_, i) => i + 1).map((k) => html`<label class="choice">
+          <input type="radio" name="qualifiers_per_pool" value="${k}" ${raw(Number(v.qualifiers_per_pool) === k ? 'checked' : '')}>
+          <span>${k === 1 ? 'Le 1er' : `Les ${k} premiers`}<small>de chaque poule</small></span></label>`)}</div>
+      </fieldset>
+      <fieldset><legend>Si le tableau final n'est pas complet (6 qualifiés pour 8 places…)</legend>
+        <div class="choices">${Object.entries(FILL_MODES).map(([mode, label]) => {
+          const [verb, ...rest] = label.split(' ');
+          return html`<label class="choice"><input type="radio" name="fill_mode" value="${mode}" ${raw(v.fill_mode === mode ? 'checked' : '')}>
+            <span>${verb}<small>${rest.join(' ')}${mode === 'bye' ? ' au 1er tour' : ''}</small></span></label>`;
         })}</div>
       </fieldset>
       <label class="switch"><input type="checkbox" name="consolante" value="1" ${raw(v.consolante ? 'checked' : '')}>
@@ -234,8 +239,10 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables }
   const runnerUp = champion ? (final.team1_id === champion ? final.team2_id : final.team1_id) : null;
   const thirdPlace = main.find((m) => m.third)?.winner_id;
   const consChamp = cons.length ? finalOf(cons)?.winner_id : null;
-  const perPool = Math.floor(2 ** t.finals_rounds / t.nb_pools);
-  const firstRound = ROUND_OPTIONS.find((o) => o.value === t.finals_rounds).label.split(' (')[0].replace(' uniquement', '');
+  const format = tournamentFormat(t);
+  const perPool = format.perPool;
+  const firstRound = roundName(format.size / 2);
+  const qualifLabel = `${perPool === 1 ? '1er' : `${perPool} premiers`} de poule${format.extra ? ` + ${format.extra} repêché${format.extra > 1 ? 's' : ''}` : ''}`;
 
   const stepIndex = champion ? 3 : { setup: 0, pools: 1, finals: 2 }[t.status];
   const steps = ['Inscriptions', 'Poules', 'Phases finales'];
@@ -250,7 +257,7 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables }
         <div class="row">${statusSticker(t.status)}${t.date ? html`<span class="muted">📅 ${formatDate(t.date)}</span>` : ''}</div>
         <h1>${t.name}</h1>
         <div class="row"><span class="chip">👥 ${t.nb_teams} équipes</span><span class="chip">🎱 ${plural(t.nb_pools, 'poule')}</span>
-          <span class="chip">🏆 ${firstRound}</span>${t.consolante ? html`<span class="chip">🤝 Consolante</span>` : ''}</div>
+          <span class="chip">✅ ${qualifLabel}</span><span class="chip">🏆 ${firstRound}</span>${t.consolante ? html`<span class="chip">🤝 Consolante</span>` : ''}</div>
       </div>
     </section>
     <ol class="steps" aria-label="Avancement du tournoi">${steps.map((s, i) => html`<li class="${i < stepIndex ? 'done' : i === stepIndex ? 'current' : ''}"
@@ -286,7 +293,9 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables }
     </section>
 
     ${t.status !== 'setup' ? html`<section id="poules"><h2>🎱 Phase de poules</h2>
-      ${perPool > 0 ? html`<p class="legend">★ position qualificative directe pour la phase finale</p>` : ''}
+      <p class="legend">★ qualifié directement pour la phase finale${format.extra
+        ? ` · les ${format.extra} meilleur${format.extra > 1 ? 's' : ''} ${perPool + 1}ᵉ sont repêchés`
+        : format.byes ? ` · ${format.byes} exempté${format.byes > 1 ? 's' : ''} du premier tour` : ''}</p>
       <div class="grid">${poolTables.map((p) => html`<article class="card">
         <div class="pool-head"><span class="letter c${p.pool % 6}" aria-hidden="true">${String.fromCharCode(65 + p.pool)}</span>
           <h3>Poule ${String.fromCharCode(65 + p.pool)}</h3></div>

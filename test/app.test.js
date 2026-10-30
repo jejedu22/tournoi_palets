@@ -51,11 +51,13 @@ test('parcours complet + isolation entre associations', async () => {
     // un admin d'association ne peut pas gérer les associations
     assert.equal((await admA.call('GET', '/associations')).status, 403);
 
-    // création d'un tournoi : 8 équipes, 2 poules, demi-finales, consolante
+    // création d'un tournoi : 8 équipes, 2 poules, 2 premiers qualifiés → demi-finales, consolante
     t = await admA.token('/tournois/nouveau');
-    const bad = await admA.call('POST', '/tournois', { _csrf: t, name: 'X', nb_teams: 4, nb_pools: 2, finals_rounds: 3 });
+    const bad = await admA.call('POST', '/tournois', { _csrf: t, name: 'X', nb_teams: 4, nb_pools: 2, qualifiers_per_pool: 2, fill_mode: 'best' });
     assert.equal(bad.status, 400);
-    const created = await admA.call('POST', '/tournois', { _csrf: t, name: 'Open de Brest', date: '2026-11-01', nb_teams: 8, nb_pools: 2, finals_rounds: 2, consolante: '1' });
+    assert.match(bad.text, /au plus 1 par poule/);
+    const created = await admA.call('POST', '/tournois', { _csrf: t, name: 'Open de Brest', date: '2026-11-01', nb_teams: 8, nb_pools: 2,
+      qualifiers_per_pool: 2, fill_mode: 'best', consolante: '1' });
     const tid = /\/tournois\/(\d+)/.exec(created.location)[1];
 
     // isolation : l'association B ne voit ni ne modifie le tournoi de A
@@ -115,6 +117,40 @@ test('parcours complet + isolation entre associations', async () => {
 
     const page = await admA.call('GET', `/tournois/${tid}`);
     assert.ok(page.text.includes('Vainqueur'));
+  } finally { close(); }
+});
+
+test('format choisi : 3 poules, 2 premiers qualifiés, exemptions ou repêchage', async () => {
+  const { db, client, close } = await boot();
+  try {
+    const root = client();
+    await root.call('POST', '/setup', { name: 'R', email: 'r@x.fr', password: 'motdepasse1' });
+    await root.call('POST', '/login', { email: 'r@x.fr', password: 'motdepasse1' });
+    let t = await root.token('/associations');
+    await root.call('POST', '/associations', { _csrf: t, name: 'Club' });
+    const aid = db.prepare('SELECT id FROM associations').get().id;
+    await root.call('POST', `/associations/${aid}/admins`, { _csrf: t, name: 'A', email: 'a@x.fr', password: 'motdepasse1' });
+    const adm = client();
+    await adm.call('POST', '/login', { email: 'a@x.fr', password: 'motdepasse1' });
+
+    for (const [fill, firstRoundMatches, byes, cons] of [['bye', 4, 2, 6], ['best', 4, 0, 4]]) {
+      t = await adm.token('/tournois/nouveau');
+      const r = await adm.call('POST', '/tournois', { _csrf: t, name: `T-${fill}`, nb_teams: 12, nb_pools: 3, qualifiers_per_pool: 2, fill_mode: fill, consolante: '1' });
+      const tid = Number(/\/tournois\/(\d+)/.exec(r.location)[1]);
+      await adm.call('POST', `/tournois/${tid}/poules`, { _csrf: t });
+      for (const m of db.prepare("SELECT id FROM matches WHERE tournament_id = ? AND phase = 'pool'").all(tid)) {
+        await adm.call('POST', `/tournois/${tid}/matchs/${m.id}`, { _csrf: t, score1: 13, score2: m.id % 12 });
+      }
+      await adm.call('POST', `/tournois/${tid}/finales`, { _csrf: t });
+      const round1 = db.prepare("SELECT * FROM matches WHERE tournament_id = ? AND phase = 'main' AND round = 1").all(tid);
+      assert.equal(round1.length, firstRoundMatches, fill);           // quarts de finale dans les deux cas
+      assert.equal(round1.filter((m) => m.bye).length, byes, fill);
+      const inMain = new Set(round1.flatMap((m) => [m.team1_id, m.team2_id]).filter(Boolean));
+      assert.equal(inMain.size, 8 - byes, fill);
+      const consTeams = db.prepare("SELECT team1_id, team2_id FROM matches WHERE tournament_id = ? AND phase = 'consolante' AND round = 1").all(tid)
+        .flatMap((m) => [m.team1_id, m.team2_id]).filter(Boolean);
+      assert.equal(consTeams.length, cons, fill);
+    }
   } finally { close(); }
 });
 

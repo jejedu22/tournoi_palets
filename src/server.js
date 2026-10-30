@@ -3,7 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { openDb } from './db.js';
 import { hashPassword, verifyPassword, createSession, getSession, destroySession } from './auth.js';
-import { validateConfig, drawPools, roundRobin, standings, selectQualifiers, buildBracket } from './logic.js';
+import { validateConfig, finalsFormat, tournamentFormat, drawPools, roundRobin, standings, selectQualifiers, buildBracket } from './logic.js';
 import * as v from './views.js';
 import { getStatic } from './static.js';
 
@@ -173,19 +173,23 @@ export function createApp(db) {
   route('POST', '/tournois', 'admin', ({ res, session, body }) => {
     const cfg = {
       nbTeams: Number(body.nb_teams), nbPools: Number(body.nb_pools),
-      finalsRounds: Number(body.finals_rounds), consolante: body.consolante === '1',
+      perPool: Number(body.qualifiers_per_pool), fill: body.fill_mode, consolante: body.consolante === '1',
     };
     const name = (body.name || '').trim();
     const error = !name ? 'Le nom du tournoi est requis.' : validateConfig(cfg);
     if (error) {
       return send(res, 400, v.newTournamentPage({
         session, flash: { type: 'err', message: error },
-        values: { name, date: body.date, nb_teams: body.nb_teams, nb_pools: body.nb_pools, finals_rounds: body.finals_rounds, consolante: cfg.consolante },
+        values: { name, date: body.date, nb_teams: body.nb_teams, nb_pools: body.nb_pools,
+          qualifiers_per_pool: body.qualifiers_per_pool, fill_mode: body.fill_mode, consolante: cfg.consolante },
       }));
     }
     const id = tx(() => {
-      const { lastInsertRowid } = db.prepare(`INSERT INTO tournaments (association_id, name, date, nb_teams, nb_pools, finals_rounds, consolante)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`).run(session.association_id, name, body.date || null, cfg.nbTeams, cfg.nbPools, cfg.finalsRounds, cfg.consolante ? 1 : 0);
+      const { rounds } = finalsFormat(cfg);
+      const { lastInsertRowid } = db.prepare(`INSERT INTO tournaments
+        (association_id, name, date, nb_teams, nb_pools, finals_rounds, qualifiers_per_pool, fill_mode, consolante)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(session.association_id, name, body.date || null, cfg.nbTeams, cfg.nbPools,
+        rounds, cfg.perPool, cfg.fill, cfg.consolante ? 1 : 0);
       const ins = db.prepare('INSERT INTO teams (tournament_id, name) VALUES (?, ?)');
       for (let i = 1; i <= cfg.nbTeams; i++) ins.run(lastInsertRowid, `Équipe ${i}`);
       return lastInsertRowid;
@@ -259,7 +263,8 @@ export function createApp(db) {
     const teams = db.prepare('SELECT * FROM teams WHERE tournament_id = ?').all(t.id);
     const tables = Array.from({ length: t.nb_pools }, (_, p) =>
       standings(teams.filter((x) => x.pool === p).map((x) => x.id), poolMatches.filter((m) => m.pool === p)));
-    const { qualified, eliminated } = selectQualifiers(tables, 2 ** t.finals_rounds);
+    const format = tournamentFormat(t);
+    const { qualified, eliminated } = selectQualifiers(tables, format.perPool, format.extra);
 
     tx(() => {
       const add = db.prepare(`INSERT INTO matches (tournament_id, phase, round, pos, team1_id, team2_id, winner_id, bye, third)
