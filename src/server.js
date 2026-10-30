@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { openDb } from './db.js';
+import { openDb, newPublicToken } from './db.js';
 import { hashPassword, verifyPassword, createSession, getSession, destroySession } from './auth.js';
 import { validateConfig, finalsFormat, tournamentFormat, drawPools, roundRobin, standings, selectQualifiers, buildBracket } from './logic.js';
 import * as v from './views.js';
@@ -187,9 +187,9 @@ export function createApp(db) {
     const id = tx(() => {
       const { rounds } = finalsFormat(cfg);
       const { lastInsertRowid } = db.prepare(`INSERT INTO tournaments
-        (association_id, name, date, nb_teams, nb_pools, finals_rounds, qualifiers_per_pool, fill_mode, consolante)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(session.association_id, name, body.date || null, cfg.nbTeams, cfg.nbPools,
-        rounds, cfg.perPool, cfg.fill, cfg.consolante ? 1 : 0);
+        (association_id, name, date, nb_teams, nb_pools, finals_rounds, qualifiers_per_pool, fill_mode, consolante, public_token)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(session.association_id, name, body.date || null, cfg.nbTeams, cfg.nbPools,
+        rounds, cfg.perPool, cfg.fill, cfg.consolante ? 1 : 0, newPublicToken());
       const ins = db.prepare('INSERT INTO teams (tournament_id, name) VALUES (?, ?)');
       for (let i = 1; i <= cfg.nbTeams; i++) ins.run(lastInsertRowid, `Équipe ${i}`);
       return lastInsertRowid;
@@ -197,9 +197,8 @@ export function createApp(db) {
     back(res, `/tournois/${id}`, 'ok', 'Tournoi créé. Renommez les équipes puis lancez le tirage au sort.');
   });
 
-  route('GET', '/tournois/:id', 'admin', ({ res, url, session, params }) => {
-    const t = loadTournament(session, params.id);
-    if (!t) return notFound(res, session);
+  // Équipes, matchs et classements d'un tournoi (page d'administration comme page publique)
+  const tournamentData = (t) => {
     const teams = db.prepare('SELECT * FROM teams WHERE tournament_id = ? ORDER BY id').all(t.id);
     const matches = db.prepare('SELECT * FROM matches WHERE tournament_id = ? ORDER BY phase, round, pos, id').all(t.id);
     const poolTables = [];
@@ -208,7 +207,57 @@ export function createApp(db) {
       const pm = matches.filter((m) => m.phase === 'pool' && m.pool === p);
       poolTables.push({ pool: p, rows: standings(ids, pm), matches: pm });
     }
-    send(res, 200, v.tournamentPage({ session, flash: flashOf(url), t, teams, matches, poolTables }));
+    return { teams, matches, poolTables };
+  };
+
+  // Empreinte de tout ce qu'affiche la page publique : elle change dès qu'un score ou un nom change.
+  const versionOf = (t, { teams, matches }) => createHash('sha1')
+    .update(JSON.stringify([t.name, t.date, t.status, teams.map((x) => [x.id, x.name, x.pool]),
+      matches.map((m) => [m.id, m.team1_id, m.team2_id, m.score1, m.score2])]))
+    .digest('hex').slice(0, 12);
+
+  const publicUrl = (secure, req, t) =>
+    `${process.env.PUBLIC_URL?.replace(/\/$/, '') || `${secure ? 'https' : 'http'}://${req.headers.host}`}/r/${t.public_token}`;
+
+  route('GET', '/tournois/:id', 'admin', ({ req, res, url, session, params, secure }) => {
+    const t = loadTournament(session, params.id);
+    if (!t) return notFound(res, session);
+    send(res, 200, v.tournamentPage({ session, flash: flashOf(url), t, ...tournamentData(t), publicLink: publicUrl(secure, req, t) }));
+  });
+
+  route('POST', '/tournois/:id/public', 'admin', ({ res, session, params, body }) => {
+    const t = loadTournament(session, params.id);
+    if (!t) return notFound(res, session);
+    const path = `/tournois/${t.id}#partage`;
+    if (body.action === 'enable' || body.action === 'disable') {
+      db.prepare('UPDATE tournaments SET public_enabled = ? WHERE id = ?').run(body.action === 'enable' ? 1 : 0, t.id);
+      return back(res, `/tournois/${t.id}`, 'ok', body.action === 'enable' ? 'Page publique activée.' : 'Page publique désactivée : le lien ne fonctionne plus.');
+    }
+    if (body.action === 'regenerate') {
+      db.prepare('UPDATE tournaments SET public_token = ? WHERE id = ?').run(newPublicToken(), t.id);
+      return back(res, `/tournois/${t.id}`, 'ok', "Nouveau lien public créé : l'ancien ne fonctionne plus.");
+    }
+    redirect(res, path);
+  });
+
+  // ---------- Page publique des résultats (sans connexion) ----------
+  const loadPublic = (token) => db.prepare(`SELECT t.*, a.name AS association_name FROM tournaments t
+    JOIN associations a ON a.id = t.association_id WHERE t.public_token = ? AND t.public_enabled = 1`).get(String(token));
+
+  route('GET', '/r/:token', null, ({ res, session, params }) => {
+    const t = loadPublic(params.token);
+    if (!t) return send(res, 404, v.errorPage({ status: 404, title: 'Résultats introuvables', message: "Ce lien n'existe pas ou a été désactivé par l'organisateur." }));
+    const data = tournamentData(t);
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    res.setHeader('Cache-Control', 'no-store');
+    send(res, 200, v.publicPage({ t, ...data, version: versionOf(t, data), isAdmin: session?.association_id === t.association_id }));
+  });
+
+  route('GET', '/r/:token/version', null, ({ res, params }) => {
+    const t = loadPublic(params.token);
+    if (!t) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end(''); }
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' });
+    res.end(versionOf(t, tournamentData(t)));
   });
 
   route('POST', '/tournois/:id/equipes', 'admin', ({ res, session, params, body }) => {

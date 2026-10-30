@@ -84,7 +84,20 @@ test('parcours complet + isolation entre associations', async () => {
     assert.equal(db.prepare('SELECT score1 FROM matches WHERE id = ?').get(first).score1, null);
     for (const m of pm) await admA.call('POST', `/tournois/${tid}/matchs/${m.id}`, { _csrf: t, score1: 13, score2: m.id % 12 });
 
+    // pendant les poules : la phase de poules est dépliée, en premier
+    let page = (await admA.call('GET', `/tournois/${tid}`)).text;
+    assert.ok(page.includes('<section id="poules">') && !page.includes('pools-done'));
+
     await admA.call('POST', `/tournois/${tid}/finales`, { _csrf: t });
+    // après les poules : tableau puis consolante, la phase de poules repliée en dessous
+    page = (await admA.call('GET', `/tournois/${tid}`)).text;
+    const at = (needle) => page.indexOf(needle);
+    assert.ok(at('id="tableau"') > 0 && at('id="tableau"') < at('id="consolante"') && at('id="consolante"') < at('<details id="poules"'));
+    assert.ok(!page.includes('<section id="poules">') && !/<details id="poules"[^>]*open/.test(page));
+    const token = db.prepare('SELECT public_token FROM tournaments WHERE id = ?').get(Number(tid)).public_token;
+    page = (await admB.call('GET', `/r/${token}`)).text;   // page publique, vue par n'importe qui
+    assert.ok(at('id="tableau"') > 0 && at('id="tableau"') < at('<details id="poules"'));
+
     const count = (phase) => db.prepare('SELECT COUNT(*) c FROM matches WHERE tournament_id = ? AND phase = ?').get(Number(tid), phase).c;
     assert.equal(count('main'), 4);       // 2 demies + finale + petite finale
     assert.equal(count('consolante'), 4); // 4 éliminés : idem
@@ -115,8 +128,8 @@ test('parcours complet + isolation entre associations', async () => {
     await admA.call('POST', `/tournois/${tid}/matchs/${semi.id}`, { _csrf: t, score1: 1, score2: 13 });
     assert.equal(db.prepare('SELECT score1 FROM matches WHERE id = ?').get(semi.id).score1, 13);
 
-    const page = await admA.call('GET', `/tournois/${tid}`);
-    assert.ok(page.text.includes('Vainqueur'));
+    const finished = await admA.call('GET', `/tournois/${tid}`);
+    assert.ok(finished.text.includes('Vainqueur'));
   } finally { close(); }
 });
 
@@ -224,6 +237,71 @@ test('saisie des équipes en liste et des scores en une fois', async () => {
     const page = (await adm.call('GET', `/tournois/${tid}`)).text;
     assert.match(page, /action="\/tournois\/\d+\/scores"/);
     assert.ok(!page.includes('/equipes/liste'));
+  } finally { close(); }
+});
+
+test('page publique des résultats', async () => {
+  const { db, server, client, close } = await boot();
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const root = client();
+    await root.call('POST', '/setup', { name: 'R', email: 'r@x.fr', password: 'motdepasse1' });
+    await root.call('POST', '/login', { email: 'r@x.fr', password: 'motdepasse1' });
+    let t = await root.token('/associations');
+    await root.call('POST', '/associations', { _csrf: t, name: 'Club A' });
+    await root.call('POST', '/associations', { _csrf: t, name: 'Club B' });
+    const [a, b] = db.prepare('SELECT id FROM associations ORDER BY id').all().map((x) => x.id);
+    await root.call('POST', `/associations/${a}/admins`, { _csrf: t, name: 'A', email: 'a@x.fr', password: 'motdepasse1' });
+    await root.call('POST', `/associations/${b}/admins`, { _csrf: t, name: 'B', email: 'b@x.fr', password: 'motdepasse1' });
+    const admA = client(), admB = client();
+    await admA.call('POST', '/login', { email: 'a@x.fr', password: 'motdepasse1' });
+    await admB.call('POST', '/login', { email: 'b@x.fr', password: 'motdepasse1' });
+
+    t = await admA.token('/tournois/nouveau');
+    const r = await admA.call('POST', '/tournois', { _csrf: t, name: 'Open public', nb_teams: 4, nb_pools: 1, qualifiers_per_pool: 2, fill_mode: 'best' });
+    const tid = Number(/\/tournois\/(\d+)/.exec(r.location)[1]);
+    const token = db.prepare('SELECT public_token FROM tournaments WHERE id = ?').get(tid).public_token;
+    assert.match(token, /^[\w-]{16}$/);
+
+    // la page d'administration affiche le lien public complet
+    assert.ok((await admA.call('GET', `/tournois/${tid}`)).text.includes(`/r/${token}`));
+
+    // accessible sans connexion, en lecture seule
+    const anon = await fetch(`${base}/r/${token}`);
+    assert.equal(anon.status, 200);
+    assert.equal(anon.headers.get('x-robots-tag'), 'noindex, nofollow');
+    let html = await anon.text();
+    assert.ok(html.includes('Open public') && html.includes('Club A'));
+    assert.ok(!html.includes('_csrf') && !/<input[^>]+name="s1_/.test(html) && !html.includes('Zone de danger'));
+    assert.match(html, /tirage au sort n'a pas encore eu lieu/);
+
+    // l'empreinte change quand un score est enregistré
+    await admA.call('POST', `/tournois/${tid}/equipes/liste`, { _csrf: t, liste: 'Galettes\nKorrigans\nMenhir\nTriskell' });
+    await admA.call('POST', `/tournois/${tid}/poules`, { _csrf: t });
+    const v1 = await (await fetch(`${base}/r/${token}/version`)).text();
+    const m = db.prepare("SELECT id FROM matches WHERE tournament_id = ? AND phase = 'pool'").get(tid);
+    await admA.call('POST', `/tournois/${tid}/scores`, { _csrf: t, [`s1_${m.id}`]: '13', [`s2_${m.id}`]: '7' });
+    const v2 = await (await fetch(`${base}/r/${token}/version`)).text();
+    assert.notEqual(v1, v2);
+    html = await (await fetch(`${base}/r/${token}`)).text();
+    assert.ok(html.includes('13 – 7') && html.includes(`data-version="${v2}"`) && html.includes('Korrigans'));
+
+    // une autre association ne peut pas toucher au lien
+    const tB = await admB.token('/tournois');
+    assert.equal((await admB.call('POST', `/tournois/${tid}/public`, { _csrf: tB, action: 'disable' })).status, 404);
+
+    // désactivation, réactivation, nouveau lien
+    await admA.call('POST', `/tournois/${tid}/public`, { _csrf: t, action: 'disable' });
+    assert.equal((await fetch(`${base}/r/${token}`)).status, 404);
+    assert.equal((await fetch(`${base}/r/${token}/version`)).status, 404);
+    await admA.call('POST', `/tournois/${tid}/public`, { _csrf: t, action: 'enable' });
+    assert.equal((await fetch(`${base}/r/${token}`)).status, 200);
+    await admA.call('POST', `/tournois/${tid}/public`, { _csrf: t, action: 'regenerate' });
+    const token2 = db.prepare('SELECT public_token FROM tournaments WHERE id = ?').get(tid).public_token;
+    assert.notEqual(token2, token);
+    assert.equal((await fetch(`${base}/r/${token}`)).status, 404);
+    assert.equal((await fetch(`${base}/r/${token2}`)).status, 200);
+    assert.equal((await fetch(`${base}/r/inexistant`)).status, 404);
   } finally { close(); }
 });
 

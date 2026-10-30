@@ -1,6 +1,10 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { randomBytes } from 'node:crypto';
+
+/** Jeton du lien public d'un tournoi : non devinable, sans rapport avec l'identifiant interne. */
+export const newPublicToken = () => randomBytes(12).toString('base64url');
 
 export function openDb(path = process.env.DB_PATH || 'data/tournoi.db') {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -37,6 +41,8 @@ export function openDb(path = process.env.DB_PATH || 'data/tournoi.db') {
       consolante INTEGER NOT NULL DEFAULT 0,
       qualifiers_per_pool INTEGER,
       fill_mode TEXT CHECK (fill_mode IN ('best', 'bye')),
+      public_token TEXT,
+      public_enabled INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'setup' CHECK (status IN ('setup', 'pools', 'finals')),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
@@ -73,5 +79,10 @@ export function openDb(path = process.env.DB_PATH || 'data/tournoi.db') {
   addColumn('matches', 'third', 'INTEGER NOT NULL DEFAULT 0');
   addColumn('tournaments', 'qualifiers_per_pool', 'INTEGER');
   addColumn('tournaments', 'fill_mode', "TEXT CHECK (fill_mode IN ('best', 'bye'))");
+  addColumn('tournaments', 'public_token', 'TEXT');
+  addColumn('tournaments', 'public_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_tournaments_public_token ON tournaments(public_token)');
+  const setToken = db.prepare('UPDATE tournaments SET public_token = ? WHERE id = ?');
+  for (const { id } of db.prepare('SELECT id FROM tournaments WHERE public_token IS NULL').all()) setToken.run(newPublicToken(), id);
   return db;
 }

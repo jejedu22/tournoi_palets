@@ -139,3 +139,96 @@ document.querySelectorAll('[data-team-list]').forEach((area) => {
   };
   area.addEventListener('input', update);
 });
+
+// Copier dans le presse-papiers
+document.addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-copy]');
+  if (!btn) return;
+  const field = document.querySelector(btn.dataset.copy);
+  const label = btn.textContent;
+  try {
+    await navigator.clipboard.writeText(field.value);
+    btn.textContent = '✅ Copié !';
+  } catch {
+    field.select();
+    btn.textContent = 'Ctrl+C pour copier';
+  }
+  setTimeout(() => { btn.textContent = label; }, 2000);
+});
+
+// Page publique : rechargement automatique quand un score change (empreinte de l'état du tournoi)
+const live = document.querySelector('main[data-live]');
+if (live) {
+  const key = `scroll:${location.pathname}`;
+  try {
+    const y = sessionStorage.getItem(key);
+    if (y !== null) { sessionStorage.removeItem(key); window.scrollTo(0, Number(y)); }
+  } catch { /* stockage indisponible */ }
+  const status = document.querySelector('[data-live-status]');
+  const text = document.querySelector('[data-live-text]');
+  const time = () => new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  text.textContent = `En direct · à jour à ${time()}`;
+  const check = async () => {
+    if (document.visibilityState !== 'visible') return;
+    try {
+      const res = await fetch(live.dataset.live, { cache: 'no-store' });
+      if (!res.ok) throw new Error(String(res.status));
+      const version = (await res.text()).trim();
+      status.classList.remove('stale');
+      if (version !== live.dataset.version) {
+        try { sessionStorage.setItem(key, String(window.scrollY)); } catch { /* ignoré */ }
+        location.reload();
+        return;
+      }
+      text.textContent = `En direct · à jour à ${time()}`;
+    } catch {
+      status.classList.add('stale');
+      text.textContent = 'Connexion perdue · nouvel essai dans un instant…';
+    }
+  };
+  setInterval(check, 20000);
+  document.addEventListener('visibilitychange', check);
+}
+
+// Page publique : « mon équipe » mise en avant, choix mémorisé sur l'appareil
+const picker = document.querySelector('[data-my-team]');
+if (picker) {
+  const box = document.querySelector('[data-my-team-box]');
+  const only = document.querySelector('[data-only-mine]');
+  const teamKey = `palets-team-${picker.dataset.myTeam}`;
+  const store = {
+    get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+    set: (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch { /* ignoré */ } },
+  };
+  const apply = () => {
+    const id = picker.value;
+    document.querySelectorAll('.mine').forEach((el) => el.classList.remove('mine'));
+    if (id) {
+      document.querySelectorAll(`[data-team="${CSS.escape(id)}"], [data-teams~="${CSS.escape(id)}"]`)
+        .forEach((el) => el.classList.add('mine'));
+    }
+    only.disabled = !id;
+    document.body.classList.toggle('only-mine', Boolean(id) && only.checked);
+  };
+  picker.value = store.get(teamKey) ?? '';
+  if (picker.value === '') store.set(teamKey, null); // équipe disparue (liste modifiée)
+  only.checked = store.get('palets-only-mine') === '1';
+  box.hidden = false;
+  picker.addEventListener('change', () => { store.set(teamKey, picker.value); apply(); });
+  only.addEventListener('change', () => { store.set('palets-only-mine', only.checked ? '1' : null); apply(); });
+  apply();
+}
+
+// Un lien vers une section repliée (onglet « Poules (terminées) », #poules…) la déplie
+const openTarget = () => {
+  const id = decodeURIComponent(location.hash.slice(1));
+  const el = id ? document.getElementById(id) : null;
+  const details = el?.closest('details');
+  if (details && !details.open) { details.open = true; el.scrollIntoView(); }
+};
+window.addEventListener('hashchange', openTarget);
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href^="#"]');
+  if (a && a.getAttribute('href') === location.hash) setTimeout(openTarget); // même ancre : pas de hashchange
+});
+openTarget();

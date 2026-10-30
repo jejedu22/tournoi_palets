@@ -17,7 +17,7 @@ const formatDate = (iso) => {
     : d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 };
 
-export function layout({ title, session, flash, body, nav }) {
+export function layout({ title, session, flash, body, nav, live, homeHref }) {
   const home = session?.role === 'superadmin' ? '/associations' : '/tournois';
   return html`<!doctype html>
 <html lang="fr"><head>
@@ -25,6 +25,7 @@ export function layout({ title, session, flash, body, nav }) {
 <title>${title} · Palets Bretons</title>
 <meta name="description" content="Gestion de tournois de palets bretons : poules, phases finales, consolante.">
 <meta name="theme-color" content="#ffd23f">
+${live ? html`<meta name="robots" content="noindex, nofollow">` : ''}
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="${asset('icon.svg')}" type="image/svg+xml">
 <link rel="apple-touch-icon" href="${asset('apple-touch-icon.png')}">
@@ -35,7 +36,7 @@ export function layout({ title, session, flash, body, nav }) {
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="${session ? home : '/'}"><img src="${asset('icon.svg')}" alt="" width="40" height="40">
+  <a class="brand" href="${homeHref ?? (session ? home : '/')}"><img src="${asset('icon.svg')}" alt="" width="40" height="40">
     <span class="wordmark">Palets</span><span class="sticker tilt">Breizh</span></a>
   ${session ? html`<nav aria-label="Navigation principale">
     <a href="${home}" ${raw(nav === 'home' ? 'aria-current="page"' : '')}>${session.role === 'superadmin' ? '🏛️ Associations' : '🏆 Tournois'}</a>
@@ -47,7 +48,7 @@ export function layout({ title, session, flash, body, nav }) {
     <form method="post" action="/logout">${csrf(session)}<button class="btn btn-ghost btn-sm" aria-label="Déconnexion"><span aria-hidden="true">🚪</span><span class="label">Déconnexion</span></button></form>` : ''}
 </header>
 <div class="stripes" aria-hidden="true"></div>
-<main>
+<main ${raw(live ? html`data-live="${live.url}" data-version="${live.version}"`.toString() : '')}>
 ${flash ? html`<div class="flash ${flash.type}" role="${flash.type === 'err' ? 'alert' : 'status'}">
   <span aria-hidden="true">${flash.type === 'err' ? '😬' : '🎉'}</span><p>${flash.message}</p>
   <button type="button" data-dismiss aria-label="Fermer le message">✕</button></div>` : ''}
@@ -212,97 +213,128 @@ function scoresForm(session, t, content) {
     </div></form>`;
 }
 
-function bracketMatch(session, t, m, names) {
+function bracketMatch(m, names, editable) {
   const side = (id, score) => {
     const name = id ? names.get(id) : null;
     const cls = !name ? 'tbd' : m.winner_id && m.winner_id === id ? 'won' : '';
-    return html`<div class="side ${cls}"><span>${name ?? (m.bye ? 'Exempt' : 'À venir')}</span><span>${m.score1 != null ? score : ''}</span></div>`;
+    return html`<div class="side ${cls}" data-team="${id ?? ''}"><span>${name ?? (m.bye ? 'Exempt' : 'À venir')}</span><span>${m.score1 != null ? score : ''}</span></div>`;
   };
   return html`<div class="bm">${side(m.team1_id, m.score1)}${side(m.team2_id, m.score2)}
-    ${m.bye || !m.team1_id || !m.team2_id ? ''
+    ${!editable || m.bye || !m.team1_id || !m.team2_id ? ''
       : m.score1 == null ? scoreInputs(m, names.get(m.team1_id), names.get(m.team2_id))
       : html`<details class="edit"><summary>✏️ Corriger</summary>${scoreInputs(m, names.get(m.team1_id), names.get(m.team2_id))}</details>`}</div>`;
 }
 
-function bracketView(session, t, all, names) {
+function bracketView(session, t, all, names, editable = true) {
   const matches = all.filter((m) => !m.third);
   const third = all.find((m) => m.third);
   const rounds = [...new Set(matches.map((m) => m.round))].sort((x, y) => x - y);
-  return scoresForm(session, t, html`<div class="bracket-wrap"><div class="bracket">${rounds.map((r) => {
+  const content = html`<div class="bracket-wrap"><div class="bracket">${rounds.map((r) => {
     const ms = matches.filter((m) => m.round === r).sort((x, y) => x.pos - y.pos);
-    return html`<div class="col"><h3>${roundName(ms.length)}</h3><div class="col-body">${ms.map((m) => bracketMatch(session, t, m, names))}</div></div>`;
+    return html`<div class="col"><h3>${roundName(ms.length)}</h3><div class="col-body">${ms.map((m) => bracketMatch(m, names, editable))}</div></div>`;
   })}</div></div>
-  ${third ? html`<div class="third"><h3>🥉 Petite finale</h3>${bracketMatch(session, t, third, names)}</div>` : ''}`);
+  ${third ? html`<div class="third"><h3>🥉 Petite finale</h3>${bracketMatch(third, names, editable)}</div>` : ''}`;
+  return editable ? scoresForm(session, t, content) : content;
 }
 
-export function tournamentPage({ session, flash, t, teams, matches, poolTables }) {
-  const names = new Map(teams.map((x) => [x.id, x.name]));
-  const poolMatches = matches.filter((m) => m.phase === 'pool');
-  const main = matches.filter((m) => m.phase === 'main');
-  const cons = matches.filter((m) => m.phase === 'consolante');
-  const real = matches.filter((m) => !m.bye);
-  const played = real.filter((m) => m.score1 != null).length;
-  const poolsDone = poolMatches.length > 0 && poolMatches.every((m) => m.score1 != null);
-  const finalOf = (ms) => ms.find((m) => !m.third && m.round === Math.max(...ms.map((x) => x.round)));
-  const final = main.length ? finalOf(main) : null;
-  const champion = final?.winner_id;
-  const runnerUp = champion ? (final.team1_id === champion ? final.team2_id : final.team1_id) : null;
-  const thirdPlace = main.find((m) => m.third)?.winner_id;
-  const consChamp = cons.length ? finalOf(cons)?.winner_id : null;
-  const format = tournamentFormat(t);
-  const perPool = format.perPool;
-  const firstRound = roundName(format.size / 2);
-  const qualifLabel = `${perPool === 1 ? '1er' : `${perPool} premiers`} de poule${format.extra ? ` + ${format.extra} repêché${format.extra > 1 ? 's' : ''}` : ''}`;
-
-  const stepIndex = champion ? 3 : { setup: 0, pools: 1, finals: 2 }[t.status];
-  const steps = ['Inscriptions', 'Poules', 'Phases finales'];
-  const tabs = [['equipes', '👥 Équipes'], ...(t.status !== 'setup' ? [['poules', '🎱 Poules']] : []),
-    ...(main.length ? [['tableau', '🏆 Tableau']] : []), ...(cons.length ? [['consolante', '🤝 Consolante']] : [])];
-
-  const poolsGrid = html`<div class="grid pools-grid">${poolTables.map((p) => html`<article class="card">
+// Cartes des poules : classement + matchs (champs de score si `editable`)
+function poolCards({ poolTables, names, perPool, editable }) {
+  return html`<div class="grid pools-grid">${poolTables.map((p) => html`<article class="card pool-card">
     <div class="pool-head"><span class="letter c${p.pool % 6}" aria-hidden="true">${String.fromCharCode(65 + p.pool)}</span>
       <h3>Poule ${String.fromCharCode(65 + p.pool)}</h3></div>
     <table><thead><tr><th>#</th><th>Équipe</th><th class="n"><abbr title="Joués">J</abbr></th><th class="n"><abbr title="Victoires">V</abbr></th><th class="n">Diff</th></tr></thead><tbody>
-      ${p.rows.map((r, i) => html`<tr class="${i < perPool ? 'q' : ''}"><td class="rank">${i + 1}</td><td class="name">${names.get(r.id)}</td>
+      ${p.rows.map((r, i) => html`<tr class="${i < perPool ? 'q' : ''}" data-team="${r.id}"><td class="rank">${i + 1}</td><td class="name">${names.get(r.id)}</td>
         <td class="n">${r.played}</td><td class="n">${r.wins}</td><td class="n">${r.diff > 0 ? '+' : ''}${r.diff}</td></tr>`)}
     </tbody></table>
     <h3 class="visually-hidden">Matchs de la poule ${String.fromCharCode(65 + p.pool)}</h3>
     <ul class="matches">${p.matches.map((m) => {
       const a = names.get(m.team1_id), b = names.get(m.team2_id);
-      return html`<li class="match ${m.score1 != null ? 'played' : ''}">
+      return html`<li class="match ${m.score1 != null ? 'played' : ''}" data-teams="${m.team1_id} ${m.team2_id}">
         <span class="t ${m.winner_id === m.team1_id ? 'win' : ''}">${a}</span>
-        ${t.status === 'pools' ? scoreInputs(m, a, b) : html`<span class="final-score">${m.score1} – ${m.score2}</span>`}
+        ${editable ? scoreInputs(m, a, b) : m.score1 != null ? html`<span class="final-score">${m.score1} – ${m.score2}</span>` : html`<span class="final-score muted">à jouer</span>`}
         <span class="t right ${m.winner_id === m.team2_id ? 'win' : ''}">${b}</span></li>`;
     })}</ul>
   </article>`)}</div>`;
+}
 
-  return layout({
-    title: t.name, session, flash,
-    body: html`<a class="back" href="/tournois">← Mes tournois</a>
-    <section class="hero">
+// Données de synthèse d'un tournoi, communes à la page d'administration et à la page publique
+function summarize(t, teams, matches) {
+  const names = new Map(teams.map((x) => [x.id, x.name]));
+  const poolMatches = matches.filter((m) => m.phase === 'pool');
+  const main = matches.filter((m) => m.phase === 'main');
+  const cons = matches.filter((m) => m.phase === 'consolante');
+  const real = matches.filter((m) => !m.bye);
+  const finalOf = (ms) => ms.find((m) => !m.third && m.round === Math.max(...ms.map((x) => x.round)));
+  const final = main.length ? finalOf(main) : null;
+  const champion = final?.winner_id;
+  const format = tournamentFormat(t);
+  return {
+    names, poolMatches, main, cons, real, format, champion,
+    played: real.filter((m) => m.score1 != null).length,
+    poolsDone: poolMatches.length > 0 && poolMatches.every((m) => m.score1 != null),
+    runnerUp: champion ? (final.team1_id === champion ? final.team2_id : final.team1_id) : null,
+    thirdPlace: main.find((m) => m.third)?.winner_id,
+    consChamp: cons.length ? finalOf(cons)?.winner_id : null,
+    perPool: format.perPool,
+  };
+}
+
+// En-tête, étapes, progression et podium
+function overview(t, s, { kicker } = {}) {
+  const { names, format, perPool, champion, runnerUp, thirdPlace, consChamp, real, played } = s;
+  const qualifLabel = `${perPool === 1 ? '1er' : `${perPool} premiers`} de poule${format.extra ? ` + ${format.extra} repêché${format.extra > 1 ? 's' : ''}` : ''}`;
+  const stepIndex = champion ? 3 : { setup: 0, pools: 1, finals: 2 }[t.status];
+  const steps = ['Inscriptions', 'Poules', 'Phases finales'];
+  return html`<section class="hero">
       <div>
+        ${kicker ? html`<p class="kicker">${kicker}</p>` : ''}
         <div class="row">${statusSticker(t.status)}${t.date ? html`<span class="muted">📅 ${formatDate(t.date)}</span>` : ''}</div>
         <h1>${t.name}</h1>
         <div class="row"><span class="chip">👥 ${t.nb_teams} équipes</span><span class="chip">🎱 ${plural(t.nb_pools, 'poule')}</span>
-          <span class="chip">✅ ${qualifLabel}</span><span class="chip">🏆 ${firstRound}</span>${t.consolante ? html`<span class="chip">🤝 Consolante</span>` : ''}</div>
+          <span class="chip">✅ ${qualifLabel}</span><span class="chip">🏆 ${roundName(format.size / 2)}</span>${t.consolante ? html`<span class="chip">🤝 Consolante</span>` : ''}</div>
       </div>
     </section>
-    <ol class="steps" aria-label="Avancement du tournoi">${steps.map((s, i) => html`<li class="${i < stepIndex ? 'done' : i === stepIndex ? 'current' : ''}"
-      ${raw(i === stepIndex ? 'aria-current="step"' : '')}>${s}</li>`)}</ol>
+    <ol class="steps" aria-label="Avancement du tournoi">${steps.map((label, i) => html`<li class="${i < stepIndex ? 'done' : i === stepIndex ? 'current' : ''}"
+      ${raw(i === stepIndex ? 'aria-current="step"' : '')}>${label}</li>`)}</ol>
     ${real.length ? html`<div class="progress"><div class="progress-label"><span>Matchs joués</span><span>${played}/${real.length}</span></div>
       <progress max="${real.length}" value="${played}">${played}/${real.length}</progress></div>` : ''}
 
     ${champion ? html`<section class="card"><h2>🎉 Le podium</h2>
       <div class="podium">
-        <div class="p2"><div class="who-won">${names.get(runnerUp)}</div><div class="step">🥈</div></div>
-        <div class="p1"><div class="who-won">${names.get(champion)}</div><div class="step">🥇</div></div>
-        <div class="p3"><div class="who-won">${thirdPlace ? names.get(thirdPlace) : '—'}</div><div class="step">🥉</div></div>
+        <div class="p2" data-team="${runnerUp}"><div class="who-won">${names.get(runnerUp)}</div><div class="step">🥈</div></div>
+        <div class="p1" data-team="${champion}"><div class="who-won">${names.get(champion)}</div><div class="step">🥇</div></div>
+        <div class="p3" data-team="${thirdPlace ?? ''}"><div class="who-won">${thirdPlace ? names.get(thirdPlace) : '—'}</div><div class="step">🥉</div></div>
       </div>
-      ${consChamp ? html`<p class="cons-winner">🤝 Vainqueur de la consolante : ${names.get(consChamp)}</p>` : ''}</section>` : ''}
+      ${consChamp ? html`<p class="cons-winner">🤝 Vainqueur de la consolante : ${names.get(consChamp)}</p>` : ''}</section>` : ''}`;
+}
 
-    ${tabs.length > 1 ? html`<nav class="tabs" aria-label="Sections du tournoi">${tabs.map(([id, label]) => html`<a href="#${id}">${label}</a>`)}</nav>` : ''}
+const legend = (s) => html`<p class="legend">★ qualifié directement pour la phase finale${s.format.extra
+  ? ` · les ${s.format.extra} meilleur${s.format.extra > 1 ? 's' : ''} ${s.perPool + 1}ᵉ sont repêchés`
+  : s.format.byes ? ` · ${s.format.byes} exempté${s.format.byes > 1 ? 's' : ''} du premier tour` : ''}</p>`;
 
-    <section id="equipes">
+// Onglets : une fois les poules terminées, la phase finale passe devant
+function sectionTabs(t, s) {
+  const pools = t.status !== 'setup' ? [['poules', t.status === 'finals' ? '🎱 Poules (terminées)' : '🎱 Poules']] : [];
+  const finals = [...(s.main.length ? [['tableau', '🏆 Tableau']] : []), ...(s.cons.length ? [['consolante', '🤝 Consolante']] : [])];
+  return t.status === 'finals' ? [...finals, ...pools] : [...pools, ...finals];
+}
+
+// Phase de poules terminée : repliée sous la phase finale, consultable d'un clic
+function donePools(s, poolTables) {
+  return html`<details id="poules" class="card pools-done">
+    <summary><span class="summary-title">🎱 Phase de poules</span><span class="sticker s-setup">Terminée</span>
+      <span class="summary-hint">Voir les classements et les scores</span></summary>
+    ${legend(s)}
+    ${poolCards({ poolTables, names: s.names, perPool: s.perPool, editable: false })}
+  </details>`;
+}
+
+export function tournamentPage({ session, flash, t, teams, matches, poolTables, publicLink }) {
+  const s = summarize(t, teams, matches);
+  const { names, poolMatches, main, cons, poolsDone, perPool } = s;
+  const tabs = [...sectionTabs(t, s), ['equipes', '👥 Équipes'], ['partage', '📣 Partager']];
+  // Aux inscriptions en tête de page ; en phase finale, repliée en bas avec les poules
+  const teamsSection = html`<section id="equipes">
       ${t.status === 'setup' ? html`<div class="card">
         <h2>👥 Les équipes</h2>
         <p class="muted">Saisissez ou collez la liste des ${teams.length} équipes, enregistrez, puis lancez le tirage au sort.</p>
@@ -324,23 +356,56 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables }
           <div class="form-grid">${teams.map((x, i) => html`<div><label for="team${x.id}">Équipe ${i + 1}</label>
             <input id="team${x.id}" name="team_${x.id}" value="${x.name}" required maxlength="80"></div>`)}</div>
           <p><button class="btn-ghost">💾 Enregistrer les noms</button></p></form></details>`}
-    </section>
+    </section>`;
 
-    ${t.status !== 'setup' ? html`<section id="poules"><h2>🎱 Phase de poules</h2>
-      <p class="legend">★ qualifié directement pour la phase finale${format.extra
-        ? ` · les ${format.extra} meilleur${format.extra > 1 ? 's' : ''} ${perPool + 1}ᵉ sont repêchés`
-        : format.byes ? ` · ${format.byes} exempté${format.byes > 1 ? 's' : ''} du premier tour` : ''}</p>
-      ${t.status === 'pools' ? scoresForm(session, t, poolsGrid) : poolsGrid}
-      ${t.status === 'pools' ? html`<form class="card" method="post" action="/tournois/${t.id}/finales">${csrf(session)}
+  return layout({
+    title: t.name, session, flash,
+    body: html`<a class="back" href="/tournois">← Mes tournois</a>
+    ${overview(t, s)}
+
+    ${tabs.length > 1 ? html`<nav class="tabs" aria-label="Sections du tournoi">${tabs.map(([id, label]) => html`<a href="#${id}">${label}</a>`)}</nav>` : ''}
+
+    ${t.status !== 'finals' ? teamsSection : ''}
+
+    ${t.status === 'pools' ? html`<section id="poules"><h2>🎱 Phase de poules</h2>
+      ${legend(s)}
+      ${scoresForm(session, t, poolCards({ poolTables, names, perPool, editable: true }))}
+      <form class="card" method="post" action="/tournois/${t.id}/finales">${csrf(session)}
         <h3>Et après ?</h3>
         ${poolsDone ? html`<p>Toutes les poules sont terminées. Place au tableau final${t.consolante ? ' et à la consolante' : ''} !</p>`
           : html`<p class="muted">Les phases finales se débloquent quand tous les matchs de poule sont joués
             (${poolMatches.filter((m) => m.score1 == null).length} restant(s)).</p>`}
-        <button class="btn-yellow btn-big" ${raw(poolsDone ? '' : 'disabled')}>🏆 Générer les phases finales</button></form>` : ''}
+        <button class="btn-yellow btn-big" ${raw(poolsDone ? '' : 'disabled')}>🏆 Générer les phases finales</button></form>
     </section>` : ''}
 
     ${main.length ? html`<section id="tableau"><h2>🏆 Phase finale</h2><div class="card">${bracketView(session, t, main, names)}</div></section>` : ''}
     ${cons.length ? html`<section id="consolante"><h2>🤝 Consolante</h2><div class="card">${bracketView(session, t, cons, names)}</div></section>` : ''}
+    ${t.status === 'finals' ? donePools(s, poolTables) : ''}
+    ${t.status === 'finals' ? teamsSection : ''}
+
+    <section id="partage" class="card share">
+      <h2>📣 Résultats en direct pour les joueurs</h2>
+      ${t.public_enabled ? html`
+        <p class="muted">Partagez ce lien (SMS, réseaux, affichage sur place) : les joueurs suivent les poules, les tableaux
+          et le podium sans compte, avec une mise à jour automatique à chaque score enregistré.</p>
+        <div class="copy-row">
+          <input id="public-link" readonly value="${publicLink}" aria-label="Lien de la page publique">
+          <button type="button" class="btn-teal" data-copy="#public-link">📋 Copier</button>
+        </div>
+        <div class="row">
+          <a class="btn btn-ghost" href="${publicLink}" target="_blank" rel="noopener">👀 Voir la page publique</a>
+          <form method="post" action="/tournois/${t.id}/public">${csrf(session)}<input type="hidden" name="action" value="disable">
+            <button class="btn-ghost">🙈 Désactiver</button></form>
+        </div>
+        <details class="more"><summary>🔁 Changer le lien</summary>
+          <form method="post" action="/tournois/${t.id}/public" data-confirm="Créer un nouveau lien ? L'ancien cessera de fonctionner.">${csrf(session)}
+            <p class="muted">Utile si le lien a circulé au-delà des joueurs : l'ancien cessera de fonctionner.</p>
+            <input type="hidden" name="action" value="regenerate"><button class="btn-ghost">Générer un nouveau lien</button></form>
+        </details>`
+      : html`<p>La page publique est <strong>désactivée</strong> : le lien ne fonctionne plus.</p>
+        <form method="post" action="/tournois/${t.id}/public">${csrf(session)}<input type="hidden" name="action" value="enable">
+          <button>📣 Activer la page publique</button></form>`}
+    </section>
 
     <details class="card danger"><summary>⚠️ Zone de danger</summary>
       <div class="row">
@@ -350,5 +415,45 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables }
           <button class="btn-danger">🗑️ Supprimer le tournoi</button></form>
       </div>
     </details>`,
+  });
+}
+
+// ---------- Page publique (joueurs, sans connexion) ----------
+
+export function publicPage({ t, teams, matches, poolTables, version, isAdmin }) {
+  const s = summarize(t, teams, matches);
+  const { names, main, cons } = s;
+  const self = `/r/${t.public_token}`;
+  const tabs = sectionTabs(t, s);
+  const sorted = [...teams].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+
+  return layout({
+    title: `${t.name} · Résultats`, session: null, homeHref: self,
+    live: { url: `${self}/version`, version },
+    body: html`<p class="live-status" data-live-status><span class="dot" aria-hidden="true"></span>
+      <span data-live-text>Résultats en direct · la page se met à jour toute seule</span></p>
+    ${isAdmin ? html`<p><a class="btn btn-ghost btn-sm" href="/tournois/${t.id}">✏️ Gérer ce tournoi</a></p>` : ''}
+    ${overview(t, s, { kicker: t.association_name })}
+
+    <section class="card my-team" data-my-team-box hidden>
+      <div class="form-grid">
+        <div><label for="my-team">⭐ Suivre mon équipe</label>
+          <select id="my-team" data-my-team="${t.public_token}"><option value="">— Choisir une équipe —</option>
+            ${sorted.map((x) => html`<option value="${x.id}">${x.name}</option>`)}</select></div>
+        <label class="switch"><input type="checkbox" data-only-mine><span>Afficher seulement ses matchs de poule</span></label>
+      </div>
+    </section>
+
+    ${tabs.length > 1 ? html`<nav class="tabs" aria-label="Sections du tournoi">${tabs.map(([id, label]) => html`<a href="#${id}">${label}</a>`)}</nav>` : ''}
+
+    ${t.status === 'setup' ? html`<section class="card empty"><div class="big-emoji" aria-hidden="true">🎲</div>
+      <h2>Le tirage au sort n'a pas encore eu lieu</h2><p>Les poules apparaîtront ici dès qu'il sera fait.</p>
+      <ul class="team-list">${sorted.map((x) => html`<li data-team="${x.id}">${x.name}</li>`)}</ul></section>`
+    : t.status === 'pools' ? html`<section id="poules"><h2>🎱 Phase de poules</h2>${legend(s)}
+      ${poolCards({ poolTables, names, perPool: s.perPool, editable: false })}</section>` : ''}
+
+    ${main.length ? html`<section id="tableau"><h2>🏆 Phase finale</h2><div class="card">${bracketView(null, t, main, names, false)}</div></section>` : ''}
+    ${cons.length ? html`<section id="consolante"><h2>🤝 Consolante</h2><div class="card">${bracketView(null, t, cons, names, false)}</div></section>` : ''}
+    ${t.status === 'finals' ? donePools(s, poolTables) : ''}`,
   });
 }
