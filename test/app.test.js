@@ -84,8 +84,19 @@ test('parcours complet + isolation entre associations', async () => {
 
     await admA.call('POST', `/tournois/${tid}/finales`, { _csrf: t });
     const count = (phase) => db.prepare('SELECT COUNT(*) c FROM matches WHERE tournament_id = ? AND phase = ?').get(Number(tid), phase).c;
-    assert.equal(count('main'), 3);       // 2 demies + finale
-    assert.equal(count('consolante'), 3); // 4 éliminés : 2 demies + finale
+    assert.equal(count('main'), 4);       // 2 demies + finale + petite finale
+    assert.equal(count('consolante'), 4); // 4 éliminés : idem
+
+    // petite finale : vide tant que les demies ne sont pas jouées
+    const thirdMatch = () => db.prepare("SELECT * FROM matches WHERE tournament_id = ? AND phase = 'main' AND third = 1").get(Number(tid));
+    assert.equal(thirdMatch().team1_id, null);
+    const semis = db.prepare("SELECT * FROM matches WHERE tournament_id = ? AND phase = 'main' AND round = 1 ORDER BY pos").all(Number(tid));
+    await admA.call('POST', `/tournois/${tid}/matchs/${semis[0].id}`, { _csrf: t, score1: 13, score2: 2 });
+    await admA.call('POST', `/tournois/${tid}/matchs/${semis[1].id}`, { _csrf: t, score1: 3, score2: 13 });
+    const s0 = db.prepare('SELECT * FROM matches WHERE id = ?').get(semis[0].id);
+    const s1 = db.prepare('SELECT * FROM matches WHERE id = ?').get(semis[1].id);
+    assert.equal(thirdMatch().team1_id, s0.team2_id); // perdants des demies
+    assert.equal(thirdMatch().team2_id, s1.team1_id);
 
     // on joue le tableau principal jusqu'au bout
     for (const phase of ['main', 'consolante']) {
@@ -94,8 +105,9 @@ test('parcours complet + isolation entre associations', async () => {
         for (const m of ms) await admA.call('POST', `/tournois/${tid}/matchs/${m.id}`, { _csrf: t, score1: 13, score2: 4 });
       }
     }
-    const final = db.prepare("SELECT * FROM matches WHERE tournament_id = ? AND phase = 'main' AND round = 2").get(Number(tid));
+    const final = db.prepare("SELECT * FROM matches WHERE tournament_id = ? AND phase = 'main' AND round = 2 AND third = 0").get(Number(tid));
     assert.ok(final.winner_id);
+    assert.equal(thirdMatch().winner_id, thirdMatch().team1_id); // 13-4 pour la première équipe
     // modifier une demi-finale alors que la finale est jouée avec un autre vainqueur est refusé
     const semi = db.prepare("SELECT * FROM matches WHERE tournament_id = ? AND phase = 'main' AND round = 1 AND pos = 0").get(Number(tid));
     await admA.call('POST', `/tournois/${tid}/matchs/${semi.id}`, { _csrf: t, score1: 1, score2: 13 });

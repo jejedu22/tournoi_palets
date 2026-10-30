@@ -142,21 +142,25 @@ function scoreForm(session, t, m, a, b) {
     <button>${m.score1 == null ? 'Valider' : 'Modifier'}</button></form>`;
 }
 
-function bracketView(session, t, matches, names, editable) {
+function matchBox(session, t, m, names, editable) {
+  const n1 = m.team1_id ? names.get(m.team1_id) : null;
+  const n2 = m.team2_id ? names.get(m.team2_id) : null;
+  const played = m.score1 != null;
+  return html`<div class="bm">
+    <div class="${m.winner_id && m.winner_id === m.team1_id ? 'win' : ''}"><span>${n1 ?? (m.bye ? 'Exempt' : '…')}</span><span>${played ? m.score1 : ''}</span></div>
+    <div class="${m.winner_id && m.winner_id === m.team2_id ? 'win' : ''}"><span>${n2 ?? (m.bye ? 'Exempt' : '…')}</span><span>${played ? m.score2 : ''}</span></div>
+    ${editable && !m.bye && m.team1_id && m.team2_id ? scoreForm(session, t, m, n1, n2) : ''}
+  </div>`;
+}
+
+function bracketView(session, t, all, names, editable) {
+  const matches = all.filter((m) => !m.third);
+  const third = all.find((m) => m.third);
   const rounds = [...new Set(matches.map((m) => m.round))].sort((x, y) => x - y);
   return html`<div class="bracket">${rounds.map((r) => {
     const ms = matches.filter((m) => m.round === r).sort((x, y) => x.pos - y.pos);
-    return html`<div class="col"><h3>${roundName(ms.length)}</h3>${ms.map((m) => {
-      const n1 = m.team1_id ? names.get(m.team1_id) : null;
-      const n2 = m.team2_id ? names.get(m.team2_id) : null;
-      const played = m.score1 != null;
-      return html`<div class="bm">
-        <div class="${m.winner_id && m.winner_id === m.team1_id ? 'win' : ''}"><span>${n1 ?? (m.bye ? 'Exempt' : '…')}</span><span>${played ? m.score1 : ''}</span></div>
-        <div class="${m.winner_id && m.winner_id === m.team2_id ? 'win' : ''}"><span>${n2 ?? (m.bye ? 'Exempt' : '…')}</span><span>${played ? m.score2 : ''}</span></div>
-        ${editable && !m.bye && m.team1_id && m.team2_id ? scoreForm(session, t, m, n1, n2) : ''}
-      </div>`;
-    })}</div>`;
-  })}</div>`;
+    return html`<div class="col"><h3>${roundName(ms.length)}</h3>${ms.map((m) => matchBox(session, t, m, names, editable))}</div>`;
+  })}</div>${third ? html`<div class="bracket"><div class="col"><h3>Petite finale (3ᵉ place)</h3>${matchBox(session, t, third, names, editable)}</div></div>` : ''}`;
 }
 
 export function tournamentPage({ session, flash, t, teams, matches, poolTables }) {
@@ -165,8 +169,10 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables }
   const main = matches.filter((m) => m.phase === 'main');
   const cons = matches.filter((m) => m.phase === 'consolante');
   const poolsDone = poolMatches.length > 0 && poolMatches.every((m) => m.score1 != null);
-  const champion = main.find((m) => m.round === Math.max(...main.map((x) => x.round)))?.winner_id;
-  const consChamp = cons.length ? cons.find((m) => m.round === Math.max(...cons.map((x) => x.round)))?.winner_id : null;
+  const finalOf = (ms) => ms.find((m) => !m.third && m.round === Math.max(...ms.map((x) => x.round)));
+  const champion = finalOf(main)?.winner_id;
+  const consChamp = cons.length ? finalOf(cons)?.winner_id : null;
+  const thirdPlace = main.find((m) => m.third)?.winner_id;
 
   return layout({
     title: t.name, session, flash,
@@ -177,7 +183,8 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables }
       · consolante : ${t.consolante ? 'oui' : 'non'}</p>
 
     ${champion ? html`<div class="card">🏆 <strong>Vainqueur :</strong> ${names.get(champion)}
-      ${consChamp ? html` · 🥈 <strong>Vainqueur consolante :</strong> ${names.get(consChamp)}` : ''}</div>` : ''}
+      ${thirdPlace ? html` · 🥉 <strong>3ᵉ place :</strong> ${names.get(thirdPlace)}` : ''}
+      ${consChamp ? html` · <strong>Vainqueur consolante :</strong> ${names.get(consChamp)}` : ''}</div>` : ''}
 
     <div class="card"><h2 style="margin-top:0">Équipes</h2>
       <form method="post" action="/tournois/${t.id}/equipes">${csrf(session)}

@@ -165,7 +165,8 @@ export function seedOrder(size) {
 /**
  * Construit un tableau à élimination directe pour des équipes classées par tête de série.
  * Les têtes de série les mieux classées sont exemptées si le nombre n'est pas une puissance de 2.
- * Retourne [{round, pos, team1, team2, winner, bye}] ; les vainqueurs d'exemptions sont déjà propagés.
+ * Une petite finale (third = true, même tour que la finale) est ajoutée dès qu'il y a deux demi-finales jouées.
+ * Retourne [{round, pos, team1, team2, winner, bye, third}] ; les vainqueurs d'exemptions sont déjà propagés.
  */
 export function buildBracket(seeds) {
   const n = seeds.length;
@@ -177,7 +178,7 @@ export function buildBracket(seeds) {
   const grid = [];
   for (let r = 1; r <= rounds; r++) {
     grid[r] = Array.from({ length: size / 2 ** r }, (_, pos) => ({
-      round: r, pos, team1: null, team2: null, winner: null, bye: false,
+      round: r, pos, team1: null, team2: null, winner: null, bye: false, third: false,
     }));
   }
   const order = seedOrder(size);
@@ -191,5 +192,10 @@ export function buildBracket(seeds) {
       if (next) next[pos % 2 === 0 ? 'team1' : 'team2'] = m.winner;
     }
   });
-  return grid.slice(1).flat();
+  const matches = grid.slice(1).flat();
+  // Les demi-finales ne comportent d'exemption que si le tableau compte 3 équipes : pas de petite finale alors.
+  if (rounds >= 3 || n === 4) {
+    matches.push({ round: rounds, pos: 0, team1: null, team2: null, winner: null, bye: false, third: true });
+  }
+  return matches;
 }

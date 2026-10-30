@@ -238,10 +238,10 @@ export function createApp(db) {
     const { qualified, eliminated } = selectQualifiers(tables, 2 ** t.finals_rounds);
 
     tx(() => {
-      const add = db.prepare(`INSERT INTO matches (tournament_id, phase, round, pos, team1_id, team2_id, winner_id, bye)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+      const add = db.prepare(`INSERT INTO matches (tournament_id, phase, round, pos, team1_id, team2_id, winner_id, bye, third)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       const insertBracket = (phase, seeds) => {
-        for (const m of buildBracket(seeds)) add.run(t.id, phase, m.round, m.pos, m.team1, m.team2, m.winner, m.bye ? 1 : 0);
+        for (const m of buildBracket(seeds)) add.run(t.id, phase, m.round, m.pos, m.team1, m.team2, m.winner, m.bye ? 1 : 0, m.third ? 1 : 0);
       };
       insertBracket('main', qualified);
       if (t.consolante && eliminated.length >= 2) insertBracket('consolante', eliminated);
@@ -268,20 +268,26 @@ export function createApp(db) {
       if (m.bye || !m.team1_id || !m.team2_id) return back(res, path, 'err', 'Ce match ne peut pas encore être joué.');
     }
 
-    let next = null;
-    if (m.phase !== 'pool') {
-      next = db.prepare('SELECT * FROM matches WHERE tournament_id = ? AND phase = ? AND round = ? AND pos = ?')
-        .get(t.id, m.phase, m.round + 1, Math.floor(m.pos / 2));
-      if (next && next.score1 != null && m.winner_id !== winner) {
+    // Tour suivant (vainqueur) et, pour une demi-finale, petite finale (perdant)
+    let next = null, thirdMatch = null;
+    if (m.phase !== 'pool' && !m.third) {
+      const find = (round, pos, third) => db.prepare(
+        'SELECT * FROM matches WHERE tournament_id = ? AND phase = ? AND round = ? AND pos = ? AND third = ?')
+        .get(t.id, m.phase, round, pos, third);
+      next = find(m.round + 1, Math.floor(m.pos / 2), 0);
+      if (next) thirdMatch = find(next.round, 0, 1) ?? null;
+      const loserFeedsThird = thirdMatch && thirdMatch.round === m.round + 1;
+      if (!loserFeedsThird) thirdMatch = null;
+      if (m.winner_id !== winner && ((next && next.score1 != null) || (thirdMatch && thirdMatch.score1 != null))) {
         return back(res, path, 'err', 'Le tour suivant a déjà été joué : impossible de changer le vainqueur.');
       }
     }
+    const loser = winner === m.team1_id ? m.team2_id : m.team1_id;
     tx(() => {
       db.prepare('UPDATE matches SET score1 = ?, score2 = ?, winner_id = ? WHERE id = ?').run(s1, s2, winner, m.id);
-      if (next) {
-        const col = m.pos % 2 === 0 ? 'team1_id' : 'team2_id';
-        db.prepare(`UPDATE matches SET ${col} = ? WHERE id = ?`).run(winner, next.id);
-      }
+      const col = m.pos % 2 === 0 ? 'team1_id' : 'team2_id';
+      if (next) db.prepare(`UPDATE matches SET ${col} = ? WHERE id = ?`).run(winner, next.id);
+      if (thirdMatch) db.prepare(`UPDATE matches SET ${col} = ? WHERE id = ?`).run(loser, thirdMatch.id);
     });
     back(res, path, 'ok', 'Score enregistré.');
   });

@@ -56,10 +56,15 @@ export function openDb(path = process.env.DB_PATH || 'data/tournoi.db') {
       score1 INTEGER,
       score2 INTEGER,
       winner_id INTEGER REFERENCES teams(id) ON DELETE SET NULL,
-      bye INTEGER NOT NULL DEFAULT 0
+      bye INTEGER NOT NULL DEFAULT 0,
+      third INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_tournaments_assoc ON tournaments(association_id);
     CREATE INDEX IF NOT EXISTS idx_matches_tournament ON matches(tournament_id);
   `);
+  // Migration des bases créées avant la petite finale
+  if (!db.prepare('PRAGMA table_info(matches)').all().some((c) => c.name === 'third')) {
+    db.exec('ALTER TABLE matches ADD COLUMN third INTEGER NOT NULL DEFAULT 0');
+  }
   return db;
 }

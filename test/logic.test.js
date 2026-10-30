@@ -55,7 +55,10 @@ test('selectQualifiers : k par poule + meilleurs suivants', () => {
 test('seedOrder / buildBracket', () => {
   assert.deepEqual(seedOrder(8), [1, 8, 4, 5, 2, 7, 3, 6]);
   const full = buildBracket([1, 2, 3, 4, 5, 6, 7, 8]);
-  assert.equal(full.length, 7);
+  assert.equal(full.length, 8); // 7 matchs + petite finale
+  const third = full.filter((m) => m.third);
+  assert.equal(third.length, 1);
+  assert.equal(third[0].round, 3);
   assert.ok(full.filter((m) => m.round === 1).every((m) => m.team1 && m.team2 && !m.bye));
   // 6 équipes : têtes de série 1 et 2 exemptées, propagées en demi-finale
   const six = buildBracket([1, 2, 3, 4, 5, 6]);
@@ -63,5 +66,9 @@ test('seedOrder / buildBracket', () => {
   assert.deepEqual(byes.map((m) => m.winner).sort(), [1, 2]);
   const semi = six.filter((m) => m.round === 2).sort((x, y) => x.pos - y.pos);
   assert.deepEqual(semi.map((m) => [m.team1, m.team2]), [[1, null], [2, null]]);
+  assert.equal(buildBracket([1, 2, 3, 4]).filter((m) => m.third).length, 1);
+  // 3 équipes : une demi-finale est une exemption, donc pas de petite finale ; 2 équipes : la finale seule
+  assert.equal(buildBracket([1, 2, 3]).filter((m) => m.third).length, 0);
+  assert.equal(buildBracket([1, 2]).length, 1);
   assert.throws(() => buildBracket([1]));
 });
