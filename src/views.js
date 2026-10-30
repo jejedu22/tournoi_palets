@@ -24,7 +24,8 @@ export function layout({ title, session, flash, body, nav, live, homeHref, bodyC
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>${title} · Palets Bretons</title>
 <meta name="description" content="Gestion de tournois de palets bretons : poules, phases finales, consolante.">
-<meta name="theme-color" content="#ffd23f">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#181d25" media="(prefers-color-scheme: dark)">
 ${live ? html`<meta name="robots" content="noindex, nofollow">` : ''}
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="${asset('icon.svg')}" type="image/svg+xml">
@@ -37,31 +38,30 @@ ${live ? html`<meta name="robots" content="noindex, nofollow">` : ''}
 <body class="${bodyClass ?? ''}">
 <header class="topbar">
   <a class="brand" href="${homeHref ?? (session ? home : '/')}"><img src="${asset('icon.svg')}" alt="" width="40" height="40">
-    <span class="wordmark">Palets</span><span class="sticker tilt">Breizh</span></a>
+    <span class="wordmark">Palets Bretons</span></a>
   ${session ? html`<nav aria-label="Navigation principale">
-    <a href="${home}" ${raw(nav === 'home' ? 'aria-current="page"' : '')}>${session.role === 'superadmin' ? '🏛️ Associations' : '🏆 Tournois'}</a>
+    <a href="${home}" ${raw(nav === 'home' ? 'aria-current="page"' : '')}>${session.role === 'superadmin' ? 'Associations' : 'Tournois'}</a>
   </nav>` : ''}
   <span class="spacer"></span>
-  <button type="button" class="btn btn-ghost btn-sm install" data-install hidden>📲 Installer l'appli</button>
+  <button type="button" class="btn btn-ghost btn-sm install" data-install hidden>Installer l'application</button>
   ${session ? html`
     <span class="who"><span class="avatar" aria-hidden="true">${initial(session.name)}</span><span class="name">${session.name}</span></span>
-    <form method="post" action="/logout">${csrf(session)}<button class="btn btn-ghost btn-sm" aria-label="Déconnexion"><span aria-hidden="true">🚪</span><span class="label">Déconnexion</span></button></form>` : ''}
+    <form method="post" action="/logout">${csrf(session)}<button class="btn btn-ghost btn-sm">Déconnexion</button></form>` : ''}
 </header>
-<div class="stripes" aria-hidden="true"></div>
 <main ${raw(live ? html`data-live="${live.url}" data-version="${live.version}"`.toString() : '')}>
 ${flash ? html`<div class="flash ${flash.type}" role="${flash.type === 'err' ? 'alert' : 'status'}">
-  <span aria-hidden="true">${flash.type === 'err' ? '😬' : '🎉'}</span><p>${flash.message}</p>
+  <p>${flash.message}</p>
   <button type="button" data-dismiss aria-label="Fermer le message">✕</button></div>` : ''}
 ${body}
 </main>
-<footer class="page-footer">Fait avec 💛 pour les planches bretonnes · Kenavo !</footer>
+<footer class="page-footer">Palets Bretons · gestion de tournois</footer>
 </body></html>`;
 }
 
 export function errorPage({ session, status, title, message }) {
   return layout({
     title, session,
-    body: html`<section class="card empty"><div class="big-emoji" aria-hidden="true">${status === 404 ? '🕳️' : '🙅'}</div>
+    body: html`<section class="card empty">
       <h1>${title}</h1>${message ? html`<p>${message}</p>` : ''}
       <p><a class="btn" href="/">Retour à l'accueil</a></p></section>`,
   });
@@ -71,12 +71,11 @@ export function authPage({ title, intro, action, fields, submit, flash }) {
   return layout({
     title, flash, session: null,
     body: html`<div class="narrow-wrap"><section class="card auth">
-      <div class="big-emoji" aria-hidden="true">🥏</div>
-      <h1><span class="hl">${title}</span></h1>${intro ? html`<p class="muted">${intro}</p>` : ''}
+      <h1>${title}</h1>${intro ? html`<p class="muted">${intro}</p>` : ''}
       <form method="post" action="${action}">
         ${fields.map((f) => html`<label for="${f.name}">${f.label}</label>
           <input id="${f.name}" name="${f.name}" type="${f.type || 'text'}" autocomplete="${f.autocomplete || 'on'}" ${raw(f.attrs || 'required')}>`)}
-        <p><button class="btn-big">${submit} →</button></p>
+        <p><button class="btn-big">${submit}</button></p>
       </form></section></div>`,
   });
 }
@@ -86,22 +85,22 @@ export function authPage({ title, intro, action, fields, submit, flash }) {
 export function associationsPage({ session, flash, associations }) {
   return layout({
     title: 'Associations', session, flash, nav: 'home',
-    body: html`<h1>Les <span class="hl">associations</span> 🏛️</h1>
+    body: html`<h1>Associations</h1>
     <p class="muted">Créez une association, puis ajoutez-lui un ou plusieurs administrateurs : ils ne verront que ses tournois.</p>
     <div class="grid">
       <section class="card">
-        <h2>➕ Nouvelle association</h2>
+        <h2>Nouvelle association</h2>
         <form method="post" action="/associations">${csrf(session)}
           <label for="name">Nom de l'association</label><input id="name" name="name" required maxlength="100" placeholder="Palet Club de Quimper">
           <p><button>Créer</button></p></form>
       </section>
       ${associations.map((a) => html`<a class="card tile" href="/associations/${a.id}">
         <h3>${a.name}</h3>
-        <div class="row"><span class="chip">👤 ${plural(a.admins, 'admin')}</span><span class="chip">🏆 ${plural(a.tournaments, 'tournoi')}</span></div>
+        <div class="row"><span class="chip">${plural(a.admins, 'administrateur')}</span><span class="chip">${plural(a.tournaments, 'tournoi')}</span></div>
         ${a.admins ? '' : html`<span class="sticker">Sans administrateur</span>`}
       </a>`)}
     </div>
-    ${associations.length ? '' : html`<p class="muted">Aucune association pour l'instant : créez la première ! 🚀</p>`}`,
+    ${associations.length ? '' : html`<p class="muted">Aucune association pour l'instant.</p>`}`,
   });
 }
 
@@ -109,10 +108,10 @@ export function associationPage({ session, flash, association, admins }) {
   return layout({
     title: association.name, session, flash,
     body: html`<a class="back" href="/associations">← Associations</a>
-    <h1><span class="hl">${association.name}</span></h1>
+    <h1>${association.name}</h1>
     <div class="grid">
       <section class="card">
-        <h2>👥 Administrateurs</h2>
+        <h2>Administrateurs</h2>
         ${admins.length ? html`<ul class="people">${admins.map((u) => html`<li>
           <span class="avatar" aria-hidden="true">${initial(u.name)}</span>
           <span class="grow"><strong>${u.name}</strong><br><span class="muted">${u.email}</span></span>
@@ -121,7 +120,7 @@ export function associationPage({ session, flash, association, admins }) {
           : html`<p class="muted">Aucun administrateur : ajoutez-en un pour que l'association puisse créer ses tournois.</p>`}
       </section>
       <section class="card">
-        <h2>➕ Ajouter un administrateur</h2>
+        <h2>Ajouter un administrateur</h2>
         <form method="post" action="/associations/${association.id}/admins">${csrf(session)}
           <label for="aname">Nom</label><input id="aname" name="name" required maxlength="100" autocomplete="off">
           <label for="aemail">E-mail (identifiant)</label><input id="aemail" name="email" type="email" required autocomplete="off">
@@ -130,7 +129,7 @@ export function associationPage({ session, flash, association, admins }) {
           <p><button>Ajouter</button></p></form>
       </section>
     </div>
-    <details class="card danger"><summary>⚠️ Zone de danger</summary>
+    <details class="card danger"><summary>Zone de danger</summary>
       <form method="post" action="/associations/${association.id}/supprimer" data-confirm="Supprimer l'association, ses administrateurs et tous ses tournois ? C'est définitif.">${csrf(session)}
         <p>Supprime l'association, ses administrateurs et <strong>tous ses tournois</strong>.</p>
         <button class="btn-danger">Supprimer l'association</button></form>
@@ -144,20 +143,20 @@ export function tournamentsPage({ session, flash, association, tournaments }) {
   return layout({
     title: 'Mes tournois', session, flash, nav: 'home',
     body: html`<div class="hero">
-      <div><h1>Les tournois <span class="hl">${association.name}</span></h1>
-        <p class="muted">À la planche ! Créez un tournoi, tirez les poules au sort et suivez les scores en direct.</p></div>
-      <a class="btn btn-yellow btn-big" href="/tournois/nouveau">➕ Nouveau tournoi</a>
+      <div><p class="kicker">${association.name}</p><h1>Tournois</h1>
+        <p class="muted">Créez un tournoi, tirez les poules au sort et suivez les scores en direct.</p></div>
+      <a class="btn btn-big" href="/tournois/nouveau">Nouveau tournoi</a>
     </div>
     ${tournaments.length ? html`<div class="grid">${tournaments.map((t) => html`<a class="card tile" href="/tournois/${t.id}">
-      <div class="row">${statusSticker(t.status)}${t.date ? html`<span class="meta">📅 ${formatDate(t.date)}</span>` : ''}</div>
+      <div class="row">${statusSticker(t.status)}${t.date ? html`<span class="meta">${formatDate(t.date)}</span>` : ''}</div>
       <h3>${t.name}</h3>
-      <div class="row"><span class="chip">👥 ${t.nb_teams} équipes</span><span class="chip">🎱 ${plural(t.nb_pools, 'poule')}</span>
-        ${t.consolante ? html`<span class="chip">🤝 Consolante</span>` : ''}</div>
+      <div class="row"><span class="chip">${t.nb_teams} équipes</span><span class="chip">${plural(t.nb_pools, 'poule')}</span>
+        ${t.consolante ? html`<span class="chip">Consolante</span>` : ''}</div>
       ${t.total ? html`<div class="progress"><div class="progress-label"><span>Matchs joués</span><span>${t.played}/${t.total}</span></div>
         <progress max="${t.total}" value="${t.played}">${t.played}/${t.total}</progress></div>` : ''}
     </a>`)}</div>`
-      : html`<section class="card empty"><div class="big-emoji" aria-hidden="true">🥏</div>
-        <h2>Aucun tournoi pour l'instant</h2><p>Lancez le premier, ça prend une minute.</p>
+      : html`<section class="card empty">
+        <h2>Aucun tournoi pour l'instant</h2><p class="muted">Créez votre premier tournoi pour commencer.</p>
         <p><a class="btn btn-big" href="/tournois/nouveau">Créer un tournoi</a></p></section>`}`,
   });
 }
@@ -167,7 +166,7 @@ export function newTournamentPage({ session, flash, values = {} }) {
   return layout({
     title: 'Nouveau tournoi', session, flash,
     body: html`<a class="back" href="/tournois">← Mes tournois</a>
-    <h1>Nouveau <span class="hl">tournoi</span> ✨</h1>
+    <h1>Nouveau tournoi</h1>
     <form class="card" method="post" action="/tournois" data-tournament-form>${csrf(session)}
       <div class="form-grid">
         <div><label for="name">Nom du tournoi</label><input id="name" name="name" required maxlength="120" value="${v.name || ''}" placeholder="Open de la Saint-Yves"></div>
@@ -190,7 +189,7 @@ export function newTournamentPage({ session, flash, values = {} }) {
       <label class="switch"><input type="checkbox" name="consolante" value="1" ${raw(v.consolante ? 'checked' : '')}>
         <span>Organiser une <strong>consolante</strong> avec les équipes éliminées en poule</span></label>
       <div class="preview" data-preview aria-live="polite"></div>
-      <p><button class="btn-big">C'est parti ! 🚀</button></p>
+      <p><button class="btn-big">Créer le tournoi</button></p>
     </form>`,
   });
 }
@@ -209,7 +208,7 @@ function scoresForm(session, t, content) {
     ${content}
     <div class="savebar">
       <span class="savebar-text" data-savebar-text>Saisissez autant de scores que vous voulez, puis enregistrez tout d'un coup.</span>
-      <button class="btn-teal">💾 Enregistrer les scores</button>
+      <button>Enregistrer les scores</button>
     </div></form>`;
 }
 
@@ -222,7 +221,7 @@ function bracketMatch(m, names, editable) {
   return html`<div class="bm">${side(m.team1_id, m.score1)}${side(m.team2_id, m.score2)}
     ${!editable || m.bye || !m.team1_id || !m.team2_id ? ''
       : m.score1 == null ? scoreInputs(m, names.get(m.team1_id), names.get(m.team2_id))
-      : html`<details class="edit"><summary>✏️ Corriger</summary>${scoreInputs(m, names.get(m.team1_id), names.get(m.team2_id))}</details>`}</div>`;
+      : html`<details class="edit"><summary>Corriger</summary>${scoreInputs(m, names.get(m.team1_id), names.get(m.team2_id))}</details>`}</div>`;
 }
 
 function bracketView(session, t, all, names, editable = true) {
@@ -233,7 +232,7 @@ function bracketView(session, t, all, names, editable = true) {
     const ms = matches.filter((m) => m.round === r).sort((x, y) => x.pos - y.pos);
     return html`<div class="col"><h3>${roundName(ms.length)}</h3><div class="col-body">${ms.map((m) => bracketMatch(m, names, editable))}</div></div>`;
   })}</div></div>
-  ${third ? html`<div class="third"><h3>🥉 Petite finale</h3>${bracketMatch(third, names, editable)}</div>` : ''}`;
+  ${third ? html`<div class="third"><h3>Petite finale (3ᵉ place)</h3>${bracketMatch(third, names, editable)}</div>` : ''}`;
   return editable ? scoresForm(session, t, content) : content;
 }
 
@@ -288,10 +287,10 @@ function overview(t, s, { kicker } = {}) {
   return html`<section class="hero">
       <div>
         ${kicker ? html`<p class="kicker">${kicker}</p>` : ''}
-        <div class="row">${statusSticker(t.status)}${t.date ? html`<span class="muted">📅 ${formatDate(t.date)}</span>` : ''}</div>
+        <div class="row">${statusSticker(t.status)}${t.date ? html`<span class="muted">${formatDate(t.date)}</span>` : ''}</div>
         <h1>${t.name}</h1>
-        <div class="row"><span class="chip">👥 ${t.nb_teams} équipes</span><span class="chip">🎱 ${plural(t.nb_pools, 'poule')}</span>
-          <span class="chip">✅ ${qualifLabel}</span><span class="chip">🏆 ${roundName(format.size / 2)}</span>${t.consolante ? html`<span class="chip">🤝 Consolante</span>` : ''}</div>
+        <div class="row"><span class="chip">${t.nb_teams} équipes</span><span class="chip">${plural(t.nb_pools, 'poule')}</span>
+          <span class="chip">${qualifLabel}</span><span class="chip">${roundName(format.size / 2)}</span>${t.consolante ? html`<span class="chip">Consolante</span>` : ''}</div>
       </div>
     </section>
     <ol class="steps" aria-label="Avancement du tournoi">${steps.map((label, i) => html`<li class="${i < stepIndex ? 'done' : i === stepIndex ? 'current' : ''}"
@@ -299,13 +298,13 @@ function overview(t, s, { kicker } = {}) {
     ${real.length ? html`<div class="progress"><div class="progress-label"><span>Matchs joués</span><span>${played}/${real.length}</span></div>
       <progress max="${real.length}" value="${played}">${played}/${real.length}</progress></div>` : ''}
 
-    ${champion ? html`<section class="card"><h2>🎉 Le podium</h2>
+    ${champion ? html`<section class="card"><h2>Podium</h2>
       <div class="podium">
         <div class="p2" data-team="${runnerUp}"><div class="who-won">${names.get(runnerUp)}</div><div class="step">🥈</div></div>
         <div class="p1" data-team="${champion}"><div class="who-won">${names.get(champion)}</div><div class="step">🥇</div></div>
         <div class="p3" data-team="${thirdPlace ?? ''}"><div class="who-won">${thirdPlace ? names.get(thirdPlace) : '—'}</div><div class="step">🥉</div></div>
       </div>
-      ${consChamp ? html`<p class="cons-winner">🤝 Vainqueur de la consolante : ${names.get(consChamp)}</p>` : ''}</section>` : ''}`;
+      ${consChamp ? html`<p class="cons-winner">Vainqueur de la consolante : <strong>${names.get(consChamp)}</strong></p>` : ''}</section>` : ''}`;
 }
 
 const legend = (s) => html`<p class="legend">★ qualifié directement pour la phase finale${s.format.extra
@@ -314,15 +313,15 @@ const legend = (s) => html`<p class="legend">★ qualifié directement pour la p
 
 // Onglets : une fois les poules terminées, la phase finale passe devant
 function sectionTabs(t, s) {
-  const pools = t.status !== 'setup' ? [['poules', t.status === 'finals' ? '🎱 Poules (terminées)' : '🎱 Poules']] : [];
-  const finals = [...(s.main.length ? [['tableau', '🏆 Tableau']] : []), ...(s.cons.length ? [['consolante', '🤝 Consolante']] : [])];
+  const pools = t.status !== 'setup' ? [['poules', t.status === 'finals' ? 'Poules (terminées)' : 'Poules']] : [];
+  const finals = [...(s.main.length ? [['tableau', 'Tableau']] : []), ...(s.cons.length ? [['consolante', 'Consolante']] : [])];
   return t.status === 'finals' ? [...finals, ...pools] : [...pools, ...finals];
 }
 
 // Phase de poules terminée : repliée sous la phase finale, consultable d'un clic
 function donePools(s, poolTables) {
   return html`<details id="poules" class="card pools-done">
-    <summary><span class="summary-title">🎱 Phase de poules</span><span class="sticker s-setup">Terminée</span>
+    <summary><span class="summary-title">Phase de poules</span><span class="sticker s-setup">Terminée</span>
       <span class="summary-hint">Voir les classements et les scores</span></summary>
     ${legend(s)}
     ${poolCards({ poolTables, names: s.names, perPool: s.perPool, editable: false })}
@@ -332,30 +331,30 @@ function donePools(s, poolTables) {
 export function tournamentPage({ session, flash, t, teams, matches, poolTables, publicLink, publicQr }) {
   const s = summarize(t, teams, matches);
   const { names, poolMatches, main, cons, poolsDone, perPool } = s;
-  const tabs = [...sectionTabs(t, s), ['equipes', '👥 Équipes'], ['partage', '📣 Partager']];
+  const tabs = [...sectionTabs(t, s), ['equipes', 'Équipes'], ['partage', 'Partager']];
   // Aux inscriptions en tête de page ; en phase finale, repliée en bas avec les poules
   const teamsSection = html`<section id="equipes">
       ${t.status === 'setup' ? html`<div class="card">
-        <h2>👥 Les équipes</h2>
+        <h2>Équipes</h2>
         <p class="muted">Saisissez ou collez la liste des ${teams.length} équipes, enregistrez, puis lancez le tirage au sort.</p>
         <form method="post" action="/tournois/${t.id}/equipes/liste">${csrf(session)}
           <label for="liste">Une équipe par ligne</label>
           <textarea id="liste" name="liste" rows="${Math.min(teams.length, 16)}" spellcheck="false" data-team-list
             data-expected="${teams.length}">${teams.map((x) => x.name).join('\n')}</textarea>
           <p class="hint" data-team-count>La numérotation (« 1. », « 2) »…) et les puces sont retirées automatiquement.</p>
-          <p><button class="btn-ghost">💾 Enregistrer la liste</button></p></form>
-        <details class="more"><summary>✏️ Modifier une équipe à la fois</summary>
+          <p><button class="btn-ghost">Enregistrer la liste</button></p></form>
+        <details class="more"><summary>Modifier une équipe à la fois</summary>
           <form method="post" action="/tournois/${t.id}/equipes">${csrf(session)}
             <div class="form-grid">${teams.map((x, i) => html`<div><label for="team${x.id}">Équipe ${i + 1}</label>
               <input id="team${x.id}" name="team_${x.id}" value="${x.name}" required maxlength="80"></div>`)}</div>
-            <p><button class="btn-ghost">💾 Enregistrer les noms</button></p></form></details>
+            <p><button class="btn-ghost">Enregistrer les noms</button></p></form></details>
         <form method="post" action="/tournois/${t.id}/poules">${csrf(session)}
-          <button class="btn-yellow btn-big">🎲 Tirer au sort les poules</button></form>
-      </div>` : html`<details class="card more"><summary>👥 Les équipes (renommer)</summary>
+          <button class="btn-big">Tirer au sort les poules</button></form>
+      </div>` : html`<details class="card more"><summary>Équipes (renommer)</summary>
         <form method="post" action="/tournois/${t.id}/equipes">${csrf(session)}
           <div class="form-grid">${teams.map((x, i) => html`<div><label for="team${x.id}">Équipe ${i + 1}</label>
             <input id="team${x.id}" name="team_${x.id}" value="${x.name}" required maxlength="80"></div>`)}</div>
-          <p><button class="btn-ghost">💾 Enregistrer les noms</button></p></form></details>`}
+          <p><button class="btn-ghost">Enregistrer les noms</button></p></form></details>`}
     </section>`;
 
   return layout({
@@ -367,7 +366,7 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables, 
 
     ${t.status !== 'finals' ? teamsSection : ''}
 
-    ${t.status === 'pools' ? html`<section id="poules"><h2>🎱 Phase de poules</h2>
+    ${t.status === 'pools' ? html`<section id="poules"><h2>Phase de poules</h2>
       ${legend(s)}
       ${scoresForm(session, t, poolCards({ poolTables, names, perPool, editable: true }))}
       <form class="card" method="post" action="/tournois/${t.id}/finales">${csrf(session)}
@@ -375,16 +374,16 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables, 
         ${poolsDone ? html`<p>Toutes les poules sont terminées. Place au tableau final${t.consolante ? ' et à la consolante' : ''} !</p>`
           : html`<p class="muted">Les phases finales se débloquent quand tous les matchs de poule sont joués
             (${poolMatches.filter((m) => m.score1 == null).length} restant(s)).</p>`}
-        <button class="btn-yellow btn-big" ${raw(poolsDone ? '' : 'disabled')}>🏆 Générer les phases finales</button></form>
+        <button class="btn-big" ${raw(poolsDone ? '' : 'disabled')}>Générer les phases finales</button></form>
     </section>` : ''}
 
-    ${main.length ? html`<section id="tableau"><h2>🏆 Phase finale</h2><div class="card">${bracketView(session, t, main, names)}</div></section>` : ''}
-    ${cons.length ? html`<section id="consolante"><h2>🤝 Consolante</h2><div class="card">${bracketView(session, t, cons, names)}</div></section>` : ''}
+    ${main.length ? html`<section id="tableau"><h2>Phase finale</h2><div class="card">${bracketView(session, t, main, names)}</div></section>` : ''}
+    ${cons.length ? html`<section id="consolante"><h2>Consolante</h2><div class="card">${bracketView(session, t, cons, names)}</div></section>` : ''}
     ${t.status === 'finals' ? donePools(s, poolTables) : ''}
     ${t.status === 'finals' ? teamsSection : ''}
 
     <section id="partage" class="card share">
-      <h2>📣 Résultats en direct pour les joueurs</h2>
+      <h2>Résultats en direct pour les joueurs</h2>
       ${t.public_enabled ? html`
         <div class="share-grid">
           <div class="qr-box">${raw(publicQr)}</div>
@@ -393,32 +392,32 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables, 
               les tableaux et le podium sans compte, avec une mise à jour automatique à chaque score enregistré.</p>
             <div class="copy-row">
               <input id="public-link" readonly value="${publicLink}" aria-label="Lien de la page publique">
-              <button type="button" class="btn-teal" data-copy="#public-link">📋 Copier</button>
+              <button type="button" data-copy="#public-link">Copier</button>
             </div>
           </div>
         </div>
         <div class="row">
-          <a class="btn btn-yellow" href="/tournois/${t.id}/affiche" target="_blank" rel="noopener">🖨️ Affiche à imprimer</a>
-          <a class="btn btn-ghost" href="${publicLink}" target="_blank" rel="noopener">👀 Voir la page publique</a>
+          <a class="btn" href="/tournois/${t.id}/affiche" target="_blank" rel="noopener">Affiche à imprimer</a>
+          <a class="btn btn-ghost" href="${publicLink}" target="_blank" rel="noopener">Voir la page publique</a>
           <form method="post" action="/tournois/${t.id}/public">${csrf(session)}<input type="hidden" name="action" value="disable">
-            <button class="btn-ghost">🙈 Désactiver</button></form>
+            <button class="btn-ghost">Désactiver</button></form>
         </div>
-        <details class="more"><summary>🔁 Changer le lien</summary>
+        <details class="more"><summary>Changer le lien</summary>
           <form method="post" action="/tournois/${t.id}/public" data-confirm="Créer un nouveau lien ? L'ancien cessera de fonctionner.">${csrf(session)}
             <p class="muted">Utile si le lien a circulé au-delà des joueurs : l'ancien cessera de fonctionner.</p>
             <input type="hidden" name="action" value="regenerate"><button class="btn-ghost">Générer un nouveau lien</button></form>
         </details>`
       : html`<p>La page publique est <strong>désactivée</strong> : le lien ne fonctionne plus.</p>
         <form method="post" action="/tournois/${t.id}/public">${csrf(session)}<input type="hidden" name="action" value="enable">
-          <button>📣 Activer la page publique</button></form>`}
+          <button>Activer la page publique</button></form>`}
     </section>
 
-    <details class="card danger"><summary>⚠️ Zone de danger</summary>
+    <details class="card danger"><summary>Zone de danger</summary>
       <div class="row">
         ${t.status !== 'setup' ? html`<form method="post" action="/tournois/${t.id}/reinitialiser" data-confirm="Effacer le tirage et tous les scores ?">${csrf(session)}
-          <button class="btn-ghost">↩️ Réinitialiser le tirage</button></form>` : ''}
+          <button class="btn-ghost">Réinitialiser le tirage</button></form>` : ''}
         <form method="post" action="/tournois/${t.id}/supprimer" data-confirm="Supprimer définitivement ce tournoi ?">${csrf(session)}
-          <button class="btn-danger">🗑️ Supprimer le tournoi</button></form>
+          <button class="btn-danger">Supprimer le tournoi</button></form>
       </div>
     </details>`,
   });
@@ -438,12 +437,12 @@ export function publicPage({ t, teams, matches, poolTables, version, isAdmin, pu
     live: { url: `${self}/version`, version },
     body: html`<p class="live-status" data-live-status><span class="dot" aria-hidden="true"></span>
       <span data-live-text>Résultats en direct · la page se met à jour toute seule</span></p>
-    ${isAdmin ? html`<p><a class="btn btn-ghost btn-sm" href="/tournois/${t.id}">✏️ Gérer ce tournoi</a></p>` : ''}
+    ${isAdmin ? html`<p><a class="btn btn-ghost btn-sm" href="/tournois/${t.id}">Gérer ce tournoi</a></p>` : ''}
     ${overview(t, s, { kicker: t.association_name })}
 
     <section class="card my-team" data-my-team-box hidden>
       <div class="form-grid">
-        <div><label for="my-team">⭐ Suivre mon équipe</label>
+        <div><label for="my-team">Suivre mon équipe</label>
           <select id="my-team" data-my-team="${t.public_token}"><option value="">— Choisir une équipe —</option>
             ${sorted.map((x) => html`<option value="${x.id}">${x.name}</option>`)}</select></div>
         <label class="switch"><input type="checkbox" data-only-mine><span>Afficher seulement ses matchs de poule</span></label>
@@ -452,22 +451,22 @@ export function publicPage({ t, teams, matches, poolTables, version, isAdmin, pu
 
     ${tabs.length > 1 ? html`<nav class="tabs" aria-label="Sections du tournoi">${tabs.map(([id, label]) => html`<a href="#${id}">${label}</a>`)}</nav>` : ''}
 
-    ${t.status === 'setup' ? html`<section class="card empty"><div class="big-emoji" aria-hidden="true">🎲</div>
+    ${t.status === 'setup' ? html`<section class="card empty">
       <h2>Le tirage au sort n'a pas encore eu lieu</h2><p>Les poules apparaîtront ici dès qu'il sera fait.</p>
       <ul class="team-list">${sorted.map((x) => html`<li data-team="${x.id}">${x.name}</li>`)}</ul></section>`
-    : t.status === 'pools' ? html`<section id="poules"><h2>🎱 Phase de poules</h2>${legend(s)}
+    : t.status === 'pools' ? html`<section id="poules"><h2>Phase de poules</h2>${legend(s)}
       ${poolCards({ poolTables, names, perPool: s.perPool, editable: false })}</section>` : ''}
 
-    ${main.length ? html`<section id="tableau"><h2>🏆 Phase finale</h2><div class="card">${bracketView(null, t, main, names, false)}</div></section>` : ''}
-    ${cons.length ? html`<section id="consolante"><h2>🤝 Consolante</h2><div class="card">${bracketView(null, t, cons, names, false)}</div></section>` : ''}
+    ${main.length ? html`<section id="tableau"><h2>Phase finale</h2><div class="card">${bracketView(null, t, main, names, false)}</div></section>` : ''}
+    ${cons.length ? html`<section id="consolante"><h2>Consolante</h2><div class="card">${bracketView(null, t, cons, names, false)}</div></section>` : ''}
     ${t.status === 'finals' ? donePools(s, poolTables) : ''}
 
-    <details class="card more share-public"><summary>📲 Partager cette page</summary>
+    <details class="card more share-public"><summary>Partager cette page</summary>
       <div class="share-grid">
         <div class="qr-box">${raw(qr)}</div>
         <div><p class="muted">Faites scanner ce QR code à un autre joueur, ou envoyez-lui le lien.</p>
           <div class="copy-row"><input id="public-link" readonly value="${publicLink}" aria-label="Lien de cette page">
-            <button type="button" class="btn-teal" data-copy="#public-link">📋 Copier</button></div></div>
+            <button type="button" data-copy="#public-link">Copier</button></div></div>
       </div>
     </details>`,
   });
@@ -480,14 +479,14 @@ export function posterPage({ session, t, association, publicLink, qr }) {
     title: `Affiche · ${t.name}`, session, bodyClass: 'poster-page',
     body: html`<div class="poster-tools no-print">
       <a class="back" href="/tournois/${t.id}#partage">← Retour au tournoi</a>
-      <button type="button" class="btn-yellow" data-print>🖨️ Imprimer</button>
+      <button type="button" data-print>Imprimer</button>
     </div>
     <article class="poster">
       <p class="kicker">${association.name}</p>
       <h1>${t.name}</h1>
-      ${t.date ? html`<p class="poster-date">📅 ${formatDate(t.date)}</p>` : ''}
+      ${t.date ? html`<p class="poster-date">${formatDate(t.date)}</p>` : ''}
       <div class="poster-qr">${raw(qr)}</div>
-      <p class="poster-call">📲 Scannez pour suivre <strong>les résultats en direct</strong></p>
+      <p class="poster-call">Scannez pour suivre <strong>les résultats en direct</strong></p>
       <p class="poster-sub">Poules, tableaux, consolante et podium · sans inscription</p>
       <p class="poster-url">${publicLink}</p>
     </article>`,

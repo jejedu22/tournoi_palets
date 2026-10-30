@@ -80,7 +80,7 @@ if (form) {
     out.classList.toggle('bad', Boolean(error));
     out.replaceChildren();
     const title = document.createElement('strong');
-    title.textContent = error ? '⚠️ ' + error : '🎯 Votre format';
+    title.textContent = error || 'Format du tournoi';
     out.append(title);
     if (!error) {
       const ul = document.createElement('ul');
@@ -148,7 +148,7 @@ document.addEventListener('click', async (e) => {
   const label = btn.textContent;
   try {
     await navigator.clipboard.writeText(field.value);
-    btn.textContent = '✅ Copié !';
+    btn.textContent = 'Copié';
   } catch {
     field.select();
     btn.textContent = 'Ctrl+C pour copier';
