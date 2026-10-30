@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { openDb } from '../src/db.js';
 import { createApp } from '../src/server.js';
+import { qrSvg } from '../src/qr.js';
 
 // Client HTTP minimal avec cookie + jeton CSRF
 async function boot() {
@@ -263,8 +264,13 @@ test('page publique des résultats', async () => {
     const token = db.prepare('SELECT public_token FROM tournaments WHERE id = ?').get(tid).public_token;
     assert.match(token, /^[\w-]{16}$/);
 
-    // la page d'administration affiche le lien public complet
-    assert.ok((await admA.call('GET', `/tournois/${tid}`)).text.includes(`/r/${token}`));
+    // la page d'administration affiche le lien public complet et son QR code ; l'affiche aussi
+    const adminPage = (await admA.call('GET', `/tournois/${tid}`)).text;
+    assert.ok(adminPage.includes(`/r/${token}`) && /<svg[^>]+class="qr"/.test(adminPage));
+    const poster = await admA.call('GET', `/tournois/${tid}/affiche`);
+    assert.equal(poster.status, 200);
+    assert.ok(/<svg[^>]+class="qr"/.test(poster.text) && poster.text.includes(`/r/${token}`) && poster.text.includes('Club A'));
+    assert.equal((await admB.call('GET', `/tournois/${tid}/affiche`)).status, 404);
 
     // accessible sans connexion, en lecture seule
     const anon = await fetch(`${base}/r/${token}`);
@@ -274,6 +280,7 @@ test('page publique des résultats', async () => {
     assert.ok(html.includes('Open public') && html.includes('Club A'));
     assert.ok(!html.includes('_csrf') && !/<input[^>]+name="s1_/.test(html) && !html.includes('Zone de danger'));
     assert.match(html, /tirage au sort n'a pas encore eu lieu/);
+    assert.ok(/<svg[^>]+class="qr"/.test(html));
 
     // l'empreinte change quand un score est enregistré
     await admA.call('POST', `/tournois/${tid}/equipes/liste`, { _csrf: t, liste: 'Galettes\nKorrigans\nMenhir\nTriskell' });
@@ -293,6 +300,7 @@ test('page publique des résultats', async () => {
     // désactivation, réactivation, nouveau lien
     await admA.call('POST', `/tournois/${tid}/public`, { _csrf: t, action: 'disable' });
     assert.equal((await fetch(`${base}/r/${token}`)).status, 404);
+    assert.match(decodeURIComponent((await admA.call('GET', `/tournois/${tid}/affiche`)).location), /Activez d'abord la page publique/);
     assert.equal((await fetch(`${base}/r/${token}/version`)).status, 404);
     await admA.call('POST', `/tournois/${tid}/public`, { _csrf: t, action: 'enable' });
     assert.equal((await fetch(`${base}/r/${token}`)).status, 200);
@@ -373,4 +381,13 @@ test('PWA : manifeste, service worker, fichiers statiques et CSP', async () => {
     assert.equal((await fetch(`${base}/static/inconnu.js`, { redirect: 'manual' })).status, 404);
     assert.notEqual((await fetch(`${base}/static/..%2Fpackage.json`, { redirect: 'manual' })).status, 200);
   } finally { close(); }
+});
+
+test('qrSvg : SVG carré avec marge, sans style en ligne', () => {
+  const svg = qrSvg('https://palets.exemple.fr/r/abc', { label: 'QR <test>' });
+  const [, x, y, w, h] = /viewBox="(-?\d+) (-?\d+) (\d+) (\d+)"/.exec(svg).map(Number);
+  assert.equal(x, -4); assert.equal(y, -4); assert.equal(w, h);
+  assert.ok(w >= 21 + 8);                      // version 1 au minimum (21 modules) + marges
+  assert.ok(!svg.includes('style=') && !svg.includes('<test>'));
+  assert.notEqual(svg, qrSvg('https://palets.exemple.fr/r/abd'));
 });

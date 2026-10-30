@@ -6,6 +6,7 @@ import { hashPassword, verifyPassword, createSession, getSession, destroySession
 import { validateConfig, finalsFormat, tournamentFormat, drawPools, roundRobin, standings, selectQualifiers, buildBracket } from './logic.js';
 import * as v from './views.js';
 import { getStatic } from './static.js';
+import { qrSvg } from './qr.js';
 
 const DUMMY_HASH = hashPassword('dummy-password');
 const MAX_BODY = 100 * 1024;
@@ -222,7 +223,20 @@ export function createApp(db) {
   route('GET', '/tournois/:id', 'admin', ({ req, res, url, session, params, secure }) => {
     const t = loadTournament(session, params.id);
     if (!t) return notFound(res, session);
-    send(res, 200, v.tournamentPage({ session, flash: flashOf(url), t, ...tournamentData(t), publicLink: publicUrl(secure, req, t) }));
+    const publicLink = publicUrl(secure, req, t);
+    send(res, 200, v.tournamentPage({ session, flash: flashOf(url), t, ...tournamentData(t), publicLink,
+      publicQr: t.public_enabled ? qrSvg(publicLink, { label: `QR code des résultats de ${t.name}` }) : null }));
+  });
+
+  // Affiche A4 à imprimer : QR code géant vers la page publique
+  route('GET', '/tournois/:id/affiche', 'admin', ({ req, res, session, params, secure }) => {
+    const t = loadTournament(session, params.id);
+    if (!t) return notFound(res, session);
+    if (!t.public_enabled) return back(res, `/tournois/${t.id}`, 'err', "Activez d'abord la page publique pour imprimer l'affiche.");
+    const association = db.prepare('SELECT name FROM associations WHERE id = ?').get(t.association_id);
+    const publicLink = publicUrl(secure, req, t);
+    send(res, 200, v.posterPage({ session, t, association, publicLink,
+      qr: qrSvg(publicLink, { label: `QR code des résultats de ${t.name}` }) }));
   });
 
   route('POST', '/tournois/:id/public', 'admin', ({ res, session, params, body }) => {
@@ -244,13 +258,15 @@ export function createApp(db) {
   const loadPublic = (token) => db.prepare(`SELECT t.*, a.name AS association_name FROM tournaments t
     JOIN associations a ON a.id = t.association_id WHERE t.public_token = ? AND t.public_enabled = 1`).get(String(token));
 
-  route('GET', '/r/:token', null, ({ res, session, params }) => {
+  route('GET', '/r/:token', null, ({ req, res, session, params, secure }) => {
     const t = loadPublic(params.token);
     if (!t) return send(res, 404, v.errorPage({ status: 404, title: 'Résultats introuvables', message: "Ce lien n'existe pas ou a été désactivé par l'organisateur." }));
     const data = tournamentData(t);
     res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     res.setHeader('Cache-Control', 'no-store');
-    send(res, 200, v.publicPage({ t, ...data, version: versionOf(t, data), isAdmin: session?.association_id === t.association_id }));
+    const publicLink = publicUrl(secure, req, t);
+    send(res, 200, v.publicPage({ t, ...data, version: versionOf(t, data), isAdmin: session?.association_id === t.association_id,
+      publicLink, qr: qrSvg(publicLink, { label: `QR code de cette page` }) }));
   });
 
   route('GET', '/r/:token/version', null, ({ res, params }) => {
