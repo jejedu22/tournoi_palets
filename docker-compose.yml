@@ -1,0 +1,27 @@
+# Variables (fichier .env à côté) : DOMAIN (obligatoire), CERT_RESOLVER, TRAEFIK_NETWORK
+services:
+  palets:
+    build: .
+    restart: unless-stopped
+    environment:
+      TRUST_PROXY: "1"   # lit l'IP réelle dans X-Forwarded-For (limitation des essais de connexion)
+      COOKIE_SECURE: "1" # cookie de session réservé au HTTPS
+    volumes:
+      - palets-data:/data
+    networks: [traefik]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${TRAEFIK_NETWORK:-traefik}
+      - traefik.http.routers.palets.rule=Host(`${DOMAIN:?DOMAIN requis}`)
+      - traefik.http.routers.palets.entrypoints=websecure
+      - traefik.http.routers.palets.tls=true
+      - traefik.http.routers.palets.tls.certresolver=${CERT_RESOLVER:-letsencrypt}
+      - traefik.http.services.palets.loadbalancer.server.port=3000
+
+volumes:
+  palets-data:
+
+networks:
+  traefik:
+    name: ${TRAEFIK_NETWORK:-traefik}
+    external: true

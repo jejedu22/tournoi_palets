@@ -1,1 +1,43 @@
-# tournoi_palets
+# Tournois de palets bretons
+
+Application web de gestion de tournois de palets, multi-associations.
+Aucune dépendance npm : Node.js ≥ 22.13 (serveur HTTP natif + `node:sqlite`).
+
+## Lancer
+
+```bash
+npm start            # http://localhost:3000  (PORT et DB_PATH configurables)
+npm test
+```
+
+Au premier lancement, `/setup` demande la création du **super-administrateur**.
+Derrière un proxy HTTPS, définir `COOKIE_SECURE=1`.
+
+## Déploiement (Docker + Traefik)
+
+```bash
+echo "DOMAIN=palets.exemple.fr" > .env     # + CERT_RESOLVER (défaut : letsencrypt), TRAEFIK_NETWORK (défaut : traefik)
+docker compose up -d --build
+```
+
+- Le conteneur rejoint le réseau Docker externe de Traefik et est exposé en HTTPS (entrypoint `websecure`,
+  port interne 3000). Adaptez `CERT_RESOLVER`, `TRAEFIK_NETWORK` et le nom de l'entrypoint à votre Traefik.
+- La base SQLite est dans le volume `palets-data` (`/data/tournoi.db`) : pensez à la sauvegarder.
+- `TRUST_PROXY=1` (déjà dans le compose) fait lire l'IP réelle dans `X-Forwarded-For` pour la limitation des
+  essais de connexion ; à ne l'activer que si l'application n'est joignable que via Traefik.
+- `COOKIE_SECURE=1` réserve le cookie de session au HTTPS. Santé : `GET /healthz`.
+- Au premier accès, ouvrir `https://<DOMAIN>/setup` pour créer le super-administrateur : faites-le tout de suite,
+  la page est publique tant qu'aucun compte n'existe.
+
+## Fonctionnement
+
+- **Super-administrateur** : crée les associations et leurs administrateurs.
+- **Administrateur d'association** : ne voit et ne modifie que les tournois de son association.
+- **Tournoi** : nombre d'équipes, nombre de poules, premier tour de la phase finale
+  (finale, demi, quart, huitième, seizième) et option **consolante**.
+  1. Création → renommer les équipes → tirage au sort des poules (matchs en round-robin).
+  2. Saisie des scores (pas de match nul) ; classement : victoires, différence, points marqués, confrontation directe.
+  3. Quand toutes les poules sont jouées : génération du tableau final (les k premiers de chaque poule,
+     complétés par les meilleurs suivants si besoin) et, si activée, de la consolante avec les équipes éliminées
+     en poule. Chaque tableau de 4 équipes ou plus (sauf 3) comporte une **petite finale** (3ᵉ place) entre les
+     perdants des demi-finales. Si leur nombre n'est pas une puissance de 2, les mieux classées sont exemptées du premier tour.
