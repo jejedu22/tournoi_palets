@@ -3,6 +3,7 @@ ENV NODE_ENV=production PORT=3000 DB_PATH=/data/tournoi.db
 WORKDIR /app
 COPY package.json ./
 COPY src ./src
+COPY public ./public
 RUN mkdir /data && chown node:node /data
 USER node
 VOLUME /data

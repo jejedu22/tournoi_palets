@@ -1,0 +1,18 @@
+{
+  "name": "Palets Bretons – Tournois",
+  "short_name": "Palets",
+  "description": "Gérez vos tournois de palets bretons : poules, phases finales, consolante.",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fff4dc",
+  "theme_color": "#ffd23f",
+  "icons": [
+    { "src": "/static/icon-192.png?v=__VERSION__", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/icon-512.png?v=__VERSION__", "sizes": "512x512", "type": "image/png" },
+    { "src": "/static/icon-maskable-512.png?v=__VERSION__", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/static/icon.svg?v=__VERSION__", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

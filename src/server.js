@@ -5,10 +5,15 @@ import { openDb } from './db.js';
 import { hashPassword, verifyPassword, createSession, getSession, destroySession } from './auth.js';
 import { validateConfig, drawPools, roundRobin, standings, selectQualifiers, buildBracket } from './logic.js';
 import * as v from './views.js';
-import { html } from './html.js';
+import { getStatic } from './static.js';
 
 const DUMMY_HASH = hashPassword('dummy-password');
 const MAX_BODY = 100 * 1024;
+const CSP = [
+  "default-src 'self'", "script-src 'self'", "style-src 'self'", "img-src 'self' data:",
+  "manifest-src 'self'", "worker-src 'self'", "connect-src 'self'",
+  "form-action 'self'", "frame-ancestors 'none'", "base-uri 'none'", "object-src 'none'",
+].join('; ');
 
 export function createApp(db) {
   const routes = [];
@@ -47,7 +52,7 @@ export function createApp(db) {
     return ok ? { type: 'ok', message: ok } : err ? { type: 'err', message: err } : null;
   };
   const notFound = (res, session) =>
-    send(res, 404, v.layout({ title: 'Introuvable', session, body: html`<h1>Page introuvable</h1><p><a href="/">Accueil</a></p>` }));
+    send(res, 404, v.errorPage({ session, status: 404, title: 'Page introuvable', message: "Ce palet est tombé à côté de la planche." }));
 
   const tx = (fn) => {
     db.exec('BEGIN');
@@ -71,8 +76,8 @@ export function createApp(db) {
       title: 'Création du super-administrateur',
       intro: "Ce compte crée les associations et leurs administrateurs.",
       action: '/setup', submit: 'Créer le compte', flash: flashOf(url),
-      fields: [{ name: 'name', label: 'Nom' }, { name: 'email', label: 'E-mail', type: 'email' },
-        { name: 'password', label: 'Mot de passe (8 caractères min.)', type: 'password', attrs: 'required minlength="8"' }],
+      fields: [{ name: 'name', label: 'Nom', autocomplete: 'name' }, { name: 'email', label: 'E-mail', type: 'email', autocomplete: 'username' },
+        { name: 'password', label: 'Mot de passe (8 caractères min.)', type: 'password', autocomplete: 'new-password', attrs: 'required minlength="8"' }],
     }));
   });
   route('POST', '/setup', null, ({ res, body }) => {
@@ -88,7 +93,8 @@ export function createApp(db) {
     if (session) return redirect(res, '/');
     send(res, 200, v.authPage({
       title: 'Connexion', action: '/login', submit: 'Se connecter', flash: flashOf(url),
-      fields: [{ name: 'email', label: 'E-mail', type: 'email' }, { name: 'password', label: 'Mot de passe', type: 'password' }],
+      fields: [{ name: 'email', label: 'E-mail', type: 'email', autocomplete: 'username' },
+        { name: 'password', label: 'Mot de passe', type: 'password', autocomplete: 'current-password' }],
     }));
   });
   route('POST', '/login', null, ({ req, res, body, secure }) => {
@@ -156,7 +162,10 @@ export function createApp(db) {
   // ---------- Administrateur d'association : tournois ----------
   route('GET', '/tournois', 'admin', ({ res, url, session }) => {
     const association = db.prepare('SELECT * FROM associations WHERE id = ?').get(session.association_id);
-    const tournaments = db.prepare('SELECT * FROM tournaments WHERE association_id = ? ORDER BY COALESCE(date, created_at) DESC, id DESC').all(session.association_id);
+    const tournaments = db.prepare(`SELECT t.*,
+      (SELECT COUNT(*) FROM matches m WHERE m.tournament_id = t.id AND m.bye = 0) AS total,
+      (SELECT COUNT(*) FROM matches m WHERE m.tournament_id = t.id AND m.bye = 0 AND m.score1 IS NOT NULL) AS played
+      FROM tournaments t WHERE t.association_id = ? ORDER BY COALESCE(t.date, t.created_at) DESC, t.id DESC`).all(session.association_id);
     send(res, 200, v.tournamentsPage({ session, flash: flashOf(url), association, tournaments }));
   });
   route('GET', '/tournois/nouveau', 'admin', ({ res, url, session }) =>
@@ -322,15 +331,38 @@ export function createApp(db) {
     req.on('end', () => resolve(Object.fromEntries(new URLSearchParams(Buffer.concat(chunks).toString()))));
     req.on('error', reject);
   });
+  // PWA : /sw.js, le manifeste et la page hors-ligne sont à la racine (portée du service worker),
+  // le reste sous /static/. Les URL /static/ portent ?v=<empreinte>, d'où un cache long.
+  const ROOT_FILES = { '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/offline.html': 'offline.html' };
+  const serveStatic = (req, res, path) => {
+    if (path === '/favicon.ico') {
+      redirect(res, '/static/icon.svg');
+      return true;
+    }
+    const name = ROOT_FILES[path] ?? (path.startsWith('/static/') ? path.slice(8) : null);
+    const file = name && getStatic(name);
+    if (!file) return false;
+    const versioned = path.startsWith('/static/') && new URL(req.url, 'http://x').searchParams.has('v');
+    res.writeHead(200, {
+      'Content-Type': file.type,
+      'Content-Length': file.body.length,
+      'Cache-Control': versioned ? 'public, max-age=31536000, immutable' : 'no-cache',
+    });
+    res.end(req.method === 'HEAD' ? undefined : file.body);
+    return true;
+  };
+
   const safeEqual = (a = '', b = '') => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
   return async function handler(req, res) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'same-origin');
+    res.setHeader('Content-Security-Policy', CSP);
     try {
       const url = new URL(req.url, 'http://localhost');
       const path = url.pathname.length > 1 ? url.pathname.replace(/\/$/, '') : url.pathname;
+      if ((req.method === 'GET' || req.method === 'HEAD') && serveStatic(req, res, path)) return;
       const session = getSession(db, parseCookies(req.headers.cookie).sid);
 
       for (const r of routes) {
@@ -338,11 +370,11 @@ export function createApp(db) {
         if (!match) continue;
         if (r.role) {
           if (!session) return redirect(res, hasUsers() ? '/login' : '/setup');
-          if (r.role !== 'any' && session.role !== r.role) return send(res, 403, v.layout({ title: 'Accès refusé', session, body: html`<h1>Accès refusé</h1>` }));
+          if (r.role !== 'any' && session.role !== r.role) return send(res, 403, v.errorPage({ session, status: 403, title: 'Accès refusé' }));
         }
         const body = req.method === 'POST' ? await readBody(req) : {};
         if (req.method === 'POST' && session && !safeEqual(body._csrf, session.csrf)) {
-          return send(res, 403, v.layout({ title: 'Requête refusée', session, body: html`<h1>Requête refusée</h1><p>Jeton de sécurité invalide, rechargez la page.</p>` }));
+          return send(res, 403, v.errorPage({ session, status: 403, title: 'Requête refusée', message: 'Jeton de sécurité invalide : rechargez la page et recommencez.' }));
         }
         const secure = req.headers['x-forwarded-proto'] === 'https' || process.env.COOKIE_SECURE === '1';
         return await r.handler({ req, res, url, session, params: match.groups ?? {}, body, secure });
@@ -350,7 +382,7 @@ export function createApp(db) {
       notFound(res, session);
     } catch (err) {
       console.error(err);
-      if (!res.headersSent) send(res, 500, v.layout({ title: 'Erreur', body: html`<h1>Erreur interne</h1>` }));
+      if (!res.headersSent) send(res, 500, v.errorPage({ status: 500, title: 'Erreur interne', message: 'Quelque chose a coincé, réessayez dans un instant.' }));
     }
   };
 }

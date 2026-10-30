@@ -29,6 +29,14 @@ docker compose up -d --build
 - Au premier accès, ouvrir `https://<DOMAIN>/setup` pour créer le super-administrateur : faites-le tout de suite,
   la page est publique tant qu'aucun compte n'existe.
 
+## Application installable (PWA)
+
+L'application s'installe sur téléphone ou ordinateur (« Ajouter à l'écran d'accueil », ou bouton
+« Installer l'appli » dans l'en-tête quand le navigateur le propose) et s'ouvre en plein écran.
+Le service worker ne met en cache que les fichiers statiques et une page hors-ligne : les pages des tournois
+ne sont jamais stockées sur l'appareil, et la saisie des scores nécessite une connexion.
+L'installation exige le HTTPS (fourni par Traefik en production ; `localhost` fonctionne en développement).
+
 ## Fonctionnement
 
 - **Super-administrateur** : crée les associations et leurs administrateurs.

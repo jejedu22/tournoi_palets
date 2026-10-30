@@ -153,3 +153,37 @@ test('healthz et limitation des connexions par IP derrière un proxy', async () 
     assert.equal(await login('2.2.2.2', 'motdepasse1'), '/');                  // une autre IP n'est pas touchée
   } finally { delete process.env.TRUST_PROXY; close(); }
 });
+
+test('PWA : manifeste, service worker, fichiers statiques et CSP', async () => {
+  const { server, close } = await boot();
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const login = await fetch(`${base}/login`, { redirect: 'manual' });
+    assert.match(login.headers.get('content-security-policy'), /script-src 'self'/);
+
+    const setup = await (await fetch(`${base}/setup`)).text();
+    assert.match(setup, /<link rel="manifest" href="\/manifest.webmanifest">/);
+    const css = /href="(\/static\/app\.css\?v=[0-9a-f]+)"/.exec(setup)[1];
+
+    const manifest = await fetch(`${base}/manifest.webmanifest`);
+    assert.equal(manifest.headers.get('content-type'), 'application/manifest+json');
+    const m = await manifest.json();
+    assert.equal(m.display, 'standalone');
+    assert.ok(m.icons.some((i) => i.sizes === '512x512' && i.purpose === 'maskable'));
+    assert.ok(!JSON.stringify(m).includes('__VERSION__'));
+    for (const icon of m.icons) assert.equal((await fetch(base + icon.src)).status, 200, icon.src);
+
+    const sw = await fetch(`${base}/sw.js`);
+    assert.equal(sw.headers.get('cache-control'), 'no-cache');
+    assert.match(sw.headers.get('content-type'), /javascript/);
+    assert.ok(!(await sw.text()).includes('__VERSION__'));
+
+    const cssRes = await fetch(base + css);
+    assert.equal(cssRes.status, 200);
+    assert.match(cssRes.headers.get('cache-control'), /immutable/);
+    assert.equal((await fetch(`${base}/offline.html`)).status, 200);
+
+    assert.equal((await fetch(`${base}/static/inconnu.js`, { redirect: 'manual' })).status, 404);
+    assert.notEqual((await fetch(`${base}/static/..%2Fpackage.json`, { redirect: 'manual' })).status, 200);
+  } finally { close(); }
+});
