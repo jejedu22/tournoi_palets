@@ -154,6 +154,79 @@ test('format choisi : 3 poules, 2 premiers qualifiés, exemptions ou repêchage'
   } finally { close(); }
 });
 
+test('saisie des équipes en liste et des scores en une fois', async () => {
+  const { db, client, close } = await boot();
+  try {
+    const root = client();
+    await root.call('POST', '/setup', { name: 'R', email: 'r@x.fr', password: 'motdepasse1' });
+    await root.call('POST', '/login', { email: 'r@x.fr', password: 'motdepasse1' });
+    let t = await root.token('/associations');
+    await root.call('POST', '/associations', { _csrf: t, name: 'Club' });
+    const aid = db.prepare('SELECT id FROM associations').get().id;
+    await root.call('POST', `/associations/${aid}/admins`, { _csrf: t, name: 'A', email: 'a@x.fr', password: 'motdepasse1' });
+    const adm = client();
+    await adm.call('POST', '/login', { email: 'a@x.fr', password: 'motdepasse1' });
+    t = await adm.token('/tournois/nouveau');
+    const create = (name) => adm.call('POST', '/tournois', { _csrf: t, name, nb_teams: 8, nb_pools: 2, qualifiers_per_pool: 2, fill_mode: 'best' })
+      .then((r) => Number(/\/tournois\/(\d+)/.exec(r.location)[1]));
+    const tid = await create('Liste');
+    const other = await create('Autre');
+    const teamNames = () => db.prepare('SELECT name FROM teams WHERE tournament_id = ? ORDER BY id').all(tid).map((x) => x.name);
+
+    // --- équipes : trop de lignes refusé, numérotation et puces retirées, liste partielle acceptée
+    const tooMany = await adm.call('POST', `/tournois/${tid}/equipes/liste`, { _csrf: t, liste: Array.from({ length: 9 }, (_, i) => `E${i}`).join('\n') });
+    assert.match(decodeURIComponent(tooMany.location), /9 noms pour 8 équipes/);
+    assert.deepEqual(teamNames().slice(0, 2), ['Équipe 1', 'Équipe 2']);
+    await adm.call('POST', `/tournois/${tid}/equipes/liste`, { _csrf: t, liste: '1. Les Galettes\r\n2) Far Breton\n\n- Chouchen\n• Korrigans\n  Menhir Club  ' });
+    assert.deepEqual(teamNames(), ['Les Galettes', 'Far Breton', 'Chouchen', 'Korrigans', 'Menhir Club', 'Équipe 6', 'Équipe 7', 'Équipe 8']);
+
+    // --- scores en lot
+    await adm.call('POST', `/tournois/${tid}/poules`, { _csrf: t });
+    await adm.call('POST', `/tournois/${other}/poules`, { _csrf: t });
+    const pm = db.prepare("SELECT id FROM matches WHERE tournament_id = ? AND phase = 'pool' ORDER BY id").all(tid).map((m) => m.id);
+    const foreign = db.prepare("SELECT id FROM matches WHERE tournament_id = ? AND phase = 'pool'").get(other).id;
+    const score = (id) => ({ ...db.prepare('SELECT score1, score2 FROM matches WHERE id = ?').get(id) });
+    const form = { _csrf: t,
+      [`s1_${pm[0]}`]: '13', [`s2_${pm[0]}`]: '4',
+      [`s1_${pm[1]}`]: '7', [`s2_${pm[1]}`]: '13',
+      [`s1_${pm[2]}`]: '', [`s2_${pm[2]}`]: '',      // ligne vide : ignorée
+      [`s1_${pm[3]}`]: '10', [`s2_${pm[3]}`]: '10',  // match nul : refusé
+      [`s1_${pm[4]}`]: '13', [`s2_${pm[4]}`]: '',    // incomplet : refusé
+      [`s1_${foreign}`]: '13', [`s2_${foreign}`]: '0', // match d'un autre tournoi : ignoré
+    };
+    const r = await adm.call('POST', `/tournois/${tid}/scores`, form);
+    const msg = decodeURIComponent(r.location);
+    assert.match(msg, /err=2 scores enregistrés/);
+    assert.match(msg, /Pas de match nul/);
+    assert.match(msg, /Score incomplet/);
+    assert.deepEqual(score(pm[0]), { score1: 13, score2: 4 });
+    assert.deepEqual(score(pm[1]), { score1: 7, score2: 13 });
+    for (const id of [pm[2], pm[3], pm[4], foreign]) assert.equal(score(id).score1, null);
+
+    // renvoyer le même formulaire (scores inchangés) n'enregistre rien de plus
+    const again = await adm.call('POST', `/tournois/${tid}/scores`, { _csrf: t, [`s1_${pm[0]}`]: '13', [`s2_${pm[0]}`]: '4' });
+    assert.match(decodeURIComponent(again.location), /ok=Aucun score modifié/);
+
+    // tout le reste des poules en une seule requête, puis les demi-finales en une fois
+    const rest = { _csrf: t };
+    for (const id of pm.slice(2)) { rest[`s1_${id}`] = '13'; rest[`s2_${id}`] = String(id % 12); }
+    assert.match(decodeURIComponent((await adm.call('POST', `/tournois/${tid}/scores`, rest)).location), /ok=10 scores enregistrés/);
+    await adm.call('POST', `/tournois/${tid}/finales`, { _csrf: t });
+    const semis = db.prepare("SELECT id FROM matches WHERE tournament_id = ? AND phase = 'main' AND round = 1").all(tid);
+    const semiForm = { _csrf: t };
+    for (const m of semis) { semiForm[`s1_${m.id}`] = '13'; semiForm[`s2_${m.id}`] = '5'; }
+    await adm.call('POST', `/tournois/${tid}/scores`, semiForm);
+    const final = db.prepare("SELECT * FROM matches WHERE tournament_id = ? AND phase = 'main' AND round = 2 AND third = 0").get(tid);
+    const third = db.prepare("SELECT * FROM matches WHERE tournament_id = ? AND phase = 'main' AND third = 1").get(tid);
+    assert.ok(final.team1_id && final.team2_id && third.team1_id && third.team2_id);
+
+    // la page affiche un seul formulaire groupé pour le tableau, et la saisie en liste n'apparaît qu'aux inscriptions
+    const page = (await adm.call('GET', `/tournois/${tid}`)).text;
+    assert.match(page, /action="\/tournois\/\d+\/scores"/);
+    assert.ok(!page.includes('/equipes/liste'));
+  } finally { close(); }
+});
+
 test('échappement HTML des noms', async () => {
   const { db, client, close } = await boot();
   try {
