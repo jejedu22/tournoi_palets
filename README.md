@@ -59,6 +59,7 @@ L'installation exige le HTTPS (fourni par Traefik en production ; `localhost` fo
      les poules, un autre tout un tableau ; les scores invalides sont signalés sans bloquer les autres.
      Classement : victoires, différence, points marqués, confrontation directe.
   3. Quand toutes les poules sont jouées : génération du tableau final (les k premiers de chaque poule,
-     plus les repêchés éventuels) et, si activée, de la consolante avec les équipes éliminées
+     plus les repêchés éventuels ; la phase de poules est alors repliée sous les tableaux, consultable d'un clic)
+     et, si activée, de la consolante avec les équipes éliminées
      en poule. Chaque tableau de 4 équipes ou plus (sauf 3) comporte une **petite finale** (3ᵉ place) entre les
      perdants des demi-finales. Si leur nombre n'est pas une puissance de 2, les mieux classées sont exemptées du premier tour.

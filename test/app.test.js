@@ -84,7 +84,20 @@ test('parcours complet + isolation entre associations', async () => {
     assert.equal(db.prepare('SELECT score1 FROM matches WHERE id = ?').get(first).score1, null);
     for (const m of pm) await admA.call('POST', `/tournois/${tid}/matchs/${m.id}`, { _csrf: t, score1: 13, score2: m.id % 12 });
 
+    // pendant les poules : la phase de poules est dépliée, en premier
+    let page = (await admA.call('GET', `/tournois/${tid}`)).text;
+    assert.ok(page.includes('<section id="poules">') && !page.includes('pools-done'));
+
     await admA.call('POST', `/tournois/${tid}/finales`, { _csrf: t });
+    // après les poules : tableau puis consolante, la phase de poules repliée en dessous
+    page = (await admA.call('GET', `/tournois/${tid}`)).text;
+    const at = (needle) => page.indexOf(needle);
+    assert.ok(at('id="tableau"') > 0 && at('id="tableau"') < at('id="consolante"') && at('id="consolante"') < at('<details id="poules"'));
+    assert.ok(!page.includes('<section id="poules">') && !/<details id="poules"[^>]*open/.test(page));
+    const token = db.prepare('SELECT public_token FROM tournaments WHERE id = ?').get(Number(tid)).public_token;
+    page = (await admB.call('GET', `/r/${token}`)).text;   // page publique, vue par n'importe qui
+    assert.ok(at('id="tableau"') > 0 && at('id="tableau"') < at('<details id="poules"'));
+
     const count = (phase) => db.prepare('SELECT COUNT(*) c FROM matches WHERE tournament_id = ? AND phase = ?').get(Number(tid), phase).c;
     assert.equal(count('main'), 4);       // 2 demies + finale + petite finale
     assert.equal(count('consolante'), 4); // 4 éliminés : idem
@@ -115,8 +128,8 @@ test('parcours complet + isolation entre associations', async () => {
     await admA.call('POST', `/tournois/${tid}/matchs/${semi.id}`, { _csrf: t, score1: 1, score2: 13 });
     assert.equal(db.prepare('SELECT score1 FROM matches WHERE id = ?').get(semi.id).score1, 13);
 
-    const page = await admA.call('GET', `/tournois/${tid}`);
-    assert.ok(page.text.includes('Vainqueur'));
+    const finished = await admA.call('GET', `/tournois/${tid}`);
+    assert.ok(finished.text.includes('Vainqueur'));
   } finally { close(); }
 });
 

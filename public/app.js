@@ -218,3 +218,17 @@ if (picker) {
   only.addEventListener('change', () => { store.set('palets-only-mine', only.checked ? '1' : null); apply(); });
   apply();
 }
+
+// Un lien vers une section repliée (onglet « Poules (terminées) », #poules…) la déplie
+const openTarget = () => {
+  const id = decodeURIComponent(location.hash.slice(1));
+  const el = id ? document.getElementById(id) : null;
+  const details = el?.closest('details');
+  if (details && !details.open) { details.open = true; el.scrollIntoView(); }
+};
+window.addEventListener('hashchange', openTarget);
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href^="#"]');
+  if (a && a.getAttribute('href') === location.hash) setTimeout(openTarget); // même ancre : pas de hashchange
+});
+openTarget();

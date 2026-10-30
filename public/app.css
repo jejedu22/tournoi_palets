@@ -352,3 +352,17 @@ body.only-mine .match:not(.mine) { display: none; }
 .copy-row { display: flex; gap: .5rem; margin: .9rem 0; }
 .copy-row input { flex: 1; min-width: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9rem; }
 @media (prefers-reduced-motion: reduce) { .live-status .dot { animation: none; } }
+
+/* ---------- Poules terminées (repliées) ---------- */
+.pools-done { margin-top: 2rem; }
+.pools-done > summary { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; cursor: pointer; list-style: none; }
+.pools-done > summary::-webkit-details-marker { display: none; }
+.pools-done > summary::before {
+  content: "▸"; font-size: 1.3rem; font-weight: 900; transition: transform .15s; display: inline-block;
+}
+.pools-done[open] > summary::before { transform: rotate(90deg); }
+.pools-done .summary-title { font-size: 1.35rem; font-weight: 900; }
+.pools-done .summary-hint { color: var(--muted); font-weight: 700; font-size: .9rem; }
+.pools-done[open] .summary-hint { display: none; }
+.pools-done[open] > summary { margin-bottom: 1rem; }
+.pools-done .pools-grid > .card { box-shadow: var(--sh); }

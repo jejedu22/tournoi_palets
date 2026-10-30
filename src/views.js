@@ -312,20 +312,29 @@ const legend = (s) => html`<p class="legend">★ qualifié directement pour la p
   ? ` · les ${s.format.extra} meilleur${s.format.extra > 1 ? 's' : ''} ${s.perPool + 1}ᵉ sont repêchés`
   : s.format.byes ? ` · ${s.format.byes} exempté${s.format.byes > 1 ? 's' : ''} du premier tour` : ''}</p>`;
 
+// Onglets : une fois les poules terminées, la phase finale passe devant
+function sectionTabs(t, s) {
+  const pools = t.status !== 'setup' ? [['poules', t.status === 'finals' ? '🎱 Poules (terminées)' : '🎱 Poules']] : [];
+  const finals = [...(s.main.length ? [['tableau', '🏆 Tableau']] : []), ...(s.cons.length ? [['consolante', '🤝 Consolante']] : [])];
+  return t.status === 'finals' ? [...finals, ...pools] : [...pools, ...finals];
+}
+
+// Phase de poules terminée : repliée sous la phase finale, consultable d'un clic
+function donePools(s, poolTables) {
+  return html`<details id="poules" class="card pools-done">
+    <summary><span class="summary-title">🎱 Phase de poules</span><span class="sticker s-setup">Terminée</span>
+      <span class="summary-hint">Voir les classements et les scores</span></summary>
+    ${legend(s)}
+    ${poolCards({ poolTables, names: s.names, perPool: s.perPool, editable: false })}
+  </details>`;
+}
+
 export function tournamentPage({ session, flash, t, teams, matches, poolTables, publicLink }) {
   const s = summarize(t, teams, matches);
   const { names, poolMatches, main, cons, poolsDone, perPool } = s;
-  const tabs = [['equipes', '👥 Équipes'], ...(t.status !== 'setup' ? [['poules', '🎱 Poules']] : []),
-    ...(main.length ? [['tableau', '🏆 Tableau']] : []), ...(cons.length ? [['consolante', '🤝 Consolante']] : []), ['partage', '📣 Partager']];
-
-  return layout({
-    title: t.name, session, flash,
-    body: html`<a class="back" href="/tournois">← Mes tournois</a>
-    ${overview(t, s)}
-
-    ${tabs.length > 1 ? html`<nav class="tabs" aria-label="Sections du tournoi">${tabs.map(([id, label]) => html`<a href="#${id}">${label}</a>`)}</nav>` : ''}
-
-    <section id="equipes">
+  const tabs = [...sectionTabs(t, s), ['equipes', '👥 Équipes'], ['partage', '📣 Partager']];
+  // Aux inscriptions en tête de page ; en phase finale, repliée en bas avec les poules
+  const teamsSection = html`<section id="equipes">
       ${t.status === 'setup' ? html`<div class="card">
         <h2>👥 Les équipes</h2>
         <p class="muted">Saisissez ou collez la liste des ${teams.length} équipes, enregistrez, puis lancez le tirage au sort.</p>
@@ -347,22 +356,32 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables, 
           <div class="form-grid">${teams.map((x, i) => html`<div><label for="team${x.id}">Équipe ${i + 1}</label>
             <input id="team${x.id}" name="team_${x.id}" value="${x.name}" required maxlength="80"></div>`)}</div>
           <p><button class="btn-ghost">💾 Enregistrer les noms</button></p></form></details>`}
-    </section>
+    </section>`;
 
-    ${t.status !== 'setup' ? html`<section id="poules"><h2>🎱 Phase de poules</h2>
+  return layout({
+    title: t.name, session, flash,
+    body: html`<a class="back" href="/tournois">← Mes tournois</a>
+    ${overview(t, s)}
+
+    ${tabs.length > 1 ? html`<nav class="tabs" aria-label="Sections du tournoi">${tabs.map(([id, label]) => html`<a href="#${id}">${label}</a>`)}</nav>` : ''}
+
+    ${t.status !== 'finals' ? teamsSection : ''}
+
+    ${t.status === 'pools' ? html`<section id="poules"><h2>🎱 Phase de poules</h2>
       ${legend(s)}
-      ${t.status === 'pools' ? scoresForm(session, t, poolCards({ poolTables, names, perPool, editable: true }))
-        : poolCards({ poolTables, names, perPool, editable: false })}
-      ${t.status === 'pools' ? html`<form class="card" method="post" action="/tournois/${t.id}/finales">${csrf(session)}
+      ${scoresForm(session, t, poolCards({ poolTables, names, perPool, editable: true }))}
+      <form class="card" method="post" action="/tournois/${t.id}/finales">${csrf(session)}
         <h3>Et après ?</h3>
         ${poolsDone ? html`<p>Toutes les poules sont terminées. Place au tableau final${t.consolante ? ' et à la consolante' : ''} !</p>`
           : html`<p class="muted">Les phases finales se débloquent quand tous les matchs de poule sont joués
             (${poolMatches.filter((m) => m.score1 == null).length} restant(s)).</p>`}
-        <button class="btn-yellow btn-big" ${raw(poolsDone ? '' : 'disabled')}>🏆 Générer les phases finales</button></form>` : ''}
+        <button class="btn-yellow btn-big" ${raw(poolsDone ? '' : 'disabled')}>🏆 Générer les phases finales</button></form>
     </section>` : ''}
 
     ${main.length ? html`<section id="tableau"><h2>🏆 Phase finale</h2><div class="card">${bracketView(session, t, main, names)}</div></section>` : ''}
     ${cons.length ? html`<section id="consolante"><h2>🤝 Consolante</h2><div class="card">${bracketView(session, t, cons, names)}</div></section>` : ''}
+    ${t.status === 'finals' ? donePools(s, poolTables) : ''}
+    ${t.status === 'finals' ? teamsSection : ''}
 
     <section id="partage" class="card share">
       <h2>📣 Résultats en direct pour les joueurs</h2>
@@ -405,8 +424,7 @@ export function publicPage({ t, teams, matches, poolTables, version, isAdmin }) 
   const s = summarize(t, teams, matches);
   const { names, main, cons } = s;
   const self = `/r/${t.public_token}`;
-  const tabs = [...(t.status !== 'setup' ? [['poules', '🎱 Poules']] : []),
-    ...(main.length ? [['tableau', '🏆 Tableau']] : []), ...(cons.length ? [['consolante', '🤝 Consolante']] : [])];
+  const tabs = sectionTabs(t, s);
   const sorted = [...teams].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 
   return layout({
@@ -431,10 +449,11 @@ export function publicPage({ t, teams, matches, poolTables, version, isAdmin }) 
     ${t.status === 'setup' ? html`<section class="card empty"><div class="big-emoji" aria-hidden="true">🎲</div>
       <h2>Le tirage au sort n'a pas encore eu lieu</h2><p>Les poules apparaîtront ici dès qu'il sera fait.</p>
       <ul class="team-list">${sorted.map((x) => html`<li data-team="${x.id}">${x.name}</li>`)}</ul></section>`
-    : html`<section id="poules"><h2>🎱 Phase de poules</h2>${legend(s)}
-      ${poolCards({ poolTables, names, perPool: s.perPool, editable: false })}</section>`}
+    : t.status === 'pools' ? html`<section id="poules"><h2>🎱 Phase de poules</h2>${legend(s)}
+      ${poolCards({ poolTables, names, perPool: s.perPool, editable: false })}</section>` : ''}
 
     ${main.length ? html`<section id="tableau"><h2>🏆 Phase finale</h2><div class="card">${bracketView(null, t, main, names, false)}</div></section>` : ''}
-    ${cons.length ? html`<section id="consolante"><h2>🤝 Consolante</h2><div class="card">${bracketView(null, t, cons, names, false)}</div></section>` : ''}`,
+    ${cons.length ? html`<section id="consolante"><h2>🤝 Consolante</h2><div class="card">${bracketView(null, t, cons, names, false)}</div></section>` : ''}
+    ${t.status === 'finals' ? donePools(s, poolTables) : ''}`,
   });
 }
