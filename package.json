@@ -1,0 +1,12 @@
+{
+  "name": "tournoi-palets",
+  "version": "0.1.0",
+  "description": "Gestion de tournois de palets breton, par association",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test \"test/*.test.js\""
+  }
+}
