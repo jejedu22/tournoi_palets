@@ -45,8 +45,10 @@ L'installation exige le HTTPS (fourni par Traefik en production ; `localhost` fo
   **consolante**. La phase finale en découle (4 poules × 2 qualifiés → quarts de finale). Quand le total n'est pas une
   puissance de 2 (3 poules × 2 = 6 pour un tableau de 8), on choisit à la création de **repêcher les meilleurs
   suivants** ou d'**exempter** les mieux classés du premier tour.
-  1. Création → renommer les équipes → tirage au sort des poules (matchs en round-robin).
-  2. Saisie des scores (pas de match nul) ; classement : victoires, différence, points marqués, confrontation directe.
+  1. Création → saisie des équipes (liste à coller, une par ligne) → tirage au sort des poules (matchs en round-robin).
+  2. Saisie des scores (pas de match nul), autant que l'on veut avant d'enregistrer : un seul bouton enregistre toutes
+     les poules, un autre tout un tableau ; les scores invalides sont signalés sans bloquer les autres.
+     Classement : victoires, différence, points marqués, confrontation directe.
   3. Quand toutes les poules sont jouées : génération du tableau final (les k premiers de chaque poule,
      plus les repêchés éventuels) et, si activée, de la consolante avec les équipes éliminées
      en poule. Chaque tableau de 4 équipes ou plus (sauf 3) comporte une **petite finale** (3ᵉ place) entre les

@@ -224,6 +224,27 @@ export function createApp(db) {
     back(res, `/tournois/${t.id}`, 'ok', 'Noms des équipes enregistrés.');
   });
 
+  // Saisie en une fois : une équipe par ligne, dans l'ordre (numérotation « 1. », « 2) », puces… ignorées)
+  route('POST', '/tournois/:id/equipes/liste', 'admin', ({ res, session, params, body }) => {
+    const t = loadTournament(session, params.id);
+    if (!t) return notFound(res, session);
+    const path = `/tournois/${t.id}`;
+    const lines = String(body.liste || '').split(/\r?\n/)
+      .map((l) => l.replace(/^\s*(?:\d+\s*[.):-]|[-*•])\s*/, '').trim().slice(0, 80))
+      .filter(Boolean);
+    const teams = db.prepare('SELECT id FROM teams WHERE tournament_id = ? ORDER BY id').all(t.id);
+    if (!lines.length) return back(res, path, 'err', 'La liste est vide : saisissez une équipe par ligne.');
+    if (lines.length > teams.length) {
+      return back(res, path, 'err', `${lines.length} noms pour ${teams.length} équipes : retirez ${lines.length - teams.length} ligne(s) ou recréez le tournoi avec plus d'équipes.`);
+    }
+    const upd = db.prepare('UPDATE teams SET name = ? WHERE id = ?');
+    tx(() => lines.forEach((name, i) => upd.run(name, teams[i].id)));
+    const rest = teams.length - lines.length;
+    back(res, path, 'ok', rest
+      ? `${lines.length} équipes renommées ; ${rest} gardent leur nom actuel.`
+      : `Les ${lines.length} équipes sont enregistrées.`);
+  });
+
   route('POST', '/tournois/:id/poules', 'admin', ({ res, session, params }) => {
     const t = loadTournament(session, params.id);
     if (!t) return notFound(res, session);
@@ -279,22 +300,25 @@ export function createApp(db) {
     back(res, path, 'ok', 'Phases finales générées.');
   });
 
-  route('POST', '/tournois/:id/matchs/:mid', 'admin', ({ res, session, params, body }) => {
-    const t = loadTournament(session, params.id);
-    if (!t) return notFound(res, session);
-    const path = `/tournois/${t.id}`;
-    const m = db.prepare('SELECT * FROM matches WHERE id = ? AND tournament_id = ?').get(Number(params.mid), t.id);
-    if (!m) return notFound(res, session);
-
-    const s1 = Number(body.score1), s2 = Number(body.score2);
-    if (!Number.isInteger(s1) || !Number.isInteger(s2) || s1 < 0 || s2 < 0 || s1 > 99 || s2 > 99 || body.score1 === '' || body.score2 === '') return back(res, path, 'err', 'Scores invalides.');
-    if (s1 === s2) return back(res, path, 'err', 'Pas de match nul : un vainqueur est nécessaire.');
+  /**
+   * Enregistre le score d'un match (relu en base, car un score précédent peut avoir rempli ses équipes).
+   * Retourne { error } ou { changed }. Pour un match de tableau, qualifie le vainqueur pour le tour suivant
+   * et, en demi-finale, envoie le perdant en petite finale.
+   */
+  const recordScore = (t, matchId, raw1, raw2) => {
+    const m = db.prepare('SELECT * FROM matches WHERE id = ? AND tournament_id = ?').get(matchId, t.id);
+    if (!m) return { error: 'Match introuvable.' };
+    const s1 = Number(raw1), s2 = Number(raw2);
+    if (raw1 === '' || raw2 === '' || raw1 == null || raw2 == null) return { error: 'Score incomplet.' };
+    if (!Number.isInteger(s1) || !Number.isInteger(s2) || s1 < 0 || s2 < 0 || s1 > 99 || s2 > 99) return { error: 'Scores invalides.' };
+    if (s1 === s2) return { error: 'Pas de match nul : un vainqueur est nécessaire.' };
+    if (m.score1 === s1 && m.score2 === s2) return { changed: false };
     const winner = s1 > s2 ? m.team1_id : m.team2_id;
 
     if (m.phase === 'pool') {
-      if (t.status !== 'pools') return back(res, path, 'err', 'Les scores de poule ne sont plus modifiables.');
-    } else {
-      if (m.bye || !m.team1_id || !m.team2_id) return back(res, path, 'err', 'Ce match ne peut pas encore être joué.');
+      if (t.status !== 'pools') return { error: 'Les scores de poule ne sont plus modifiables.' };
+    } else if (m.bye || !m.team1_id || !m.team2_id) {
+      return { error: 'Ce match ne peut pas encore être joué.' };
     }
 
     // Tour suivant (vainqueur) et, pour une demi-finale, petite finale (perdant)
@@ -308,7 +332,7 @@ export function createApp(db) {
       const loserFeedsThird = thirdMatch && thirdMatch.round === m.round + 1;
       if (!loserFeedsThird) thirdMatch = null;
       if (m.winner_id !== winner && ((next && next.score1 != null) || (thirdMatch && thirdMatch.score1 != null))) {
-        return back(res, path, 'err', 'Le tour suivant a déjà été joué : impossible de changer le vainqueur.');
+        return { error: 'Le tour suivant a déjà été joué : impossible de changer le vainqueur.' };
       }
     }
     const loser = winner === m.team1_id ? m.team2_id : m.team1_id;
@@ -318,7 +342,42 @@ export function createApp(db) {
       if (next) db.prepare(`UPDATE matches SET ${col} = ? WHERE id = ?`).run(winner, next.id);
       if (thirdMatch) db.prepare(`UPDATE matches SET ${col} = ? WHERE id = ?`).run(loser, thirdMatch.id);
     });
-    back(res, path, 'ok', 'Score enregistré.');
+    return { changed: true };
+  };
+
+  route('POST', '/tournois/:id/matchs/:mid', 'admin', ({ res, session, params, body }) => {
+    const t = loadTournament(session, params.id);
+    if (!t) return notFound(res, session);
+    const r = recordScore(t, Number(params.mid), body.score1, body.score2);
+    if (r.error === 'Match introuvable.') return notFound(res, session);
+    if (r.error) return back(res, `/tournois/${t.id}`, 'err', r.error);
+    back(res, `/tournois/${t.id}`, 'ok', 'Score enregistré.');
+  });
+
+  // Saisie groupée : champs s1_<id> / s2_<id>. Les lignes vides sont ignorées, chaque score est validé
+  // séparément ; les scores valides sont enregistrés même si d'autres sont en erreur.
+  route('POST', '/tournois/:id/scores', 'admin', ({ res, session, params, body }) => {
+    const t = loadTournament(session, params.id);
+    if (!t) return notFound(res, session);
+    const path = `/tournois/${t.id}`;
+    const submitted = new Set(Object.keys(body).map((k) => /^s1_(\d+)$/.exec(k)?.[1]).filter(Boolean).map(Number));
+    // Poules d'abord, puis tableaux tour par tour : un vainqueur saisi qualifie l'équipe pour le tour suivant
+    const ordered = db.prepare(`SELECT id, team1_id, team2_id FROM matches WHERE tournament_id = ?
+      ORDER BY phase = 'pool' DESC, phase, round, third, pos`).all(t.id).filter((m) => submitted.has(m.id));
+    const names = new Map(db.prepare('SELECT id, name FROM teams WHERE tournament_id = ?').all(t.id).map((x) => [x.id, x.name]));
+
+    let saved = 0;
+    const errors = [];
+    for (const m of ordered) {
+      const raw1 = (body[`s1_${m.id}`] ?? '').trim(), raw2 = (body[`s2_${m.id}`] ?? '').trim();
+      if (raw1 === '' && raw2 === '') continue;
+      const r = recordScore(t, m.id, raw1, raw2);
+      if (r.error) errors.push(`${names.get(m.team1_id) ?? '?'} – ${names.get(m.team2_id) ?? '?'} : ${r.error}`);
+      else if (r.changed) saved++;
+    }
+    const done = saved ? `${saved} score${saved > 1 ? 's' : ''} enregistré${saved > 1 ? 's' : ''}.` : 'Aucun score modifié.';
+    if (errors.length) return back(res, path, 'err', `${saved ? done + ' ' : ''}À corriger → ${errors.join(' · ')}`);
+    back(res, path, 'ok', done);
   });
 
   route('POST', '/tournois/:id/supprimer', 'admin', ({ res, session, params }) => {

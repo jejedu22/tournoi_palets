@@ -91,3 +91,51 @@ if (form) {
   form.addEventListener('input', update);
   update();
 }
+
+// Saisie groupée des scores : compte les matchs modifiés, signale les matchs nuls,
+// et prévient avant de quitter la page avec des scores non enregistrés.
+let unsaved = false;
+document.querySelectorAll('form[data-scores]').forEach((scores) => {
+  const bar = scores.querySelector('.savebar');
+  const text = scores.querySelector('[data-savebar-text]');
+  const initialText = text.textContent;
+  const refresh = () => {
+    let changed = 0, draws = 0;
+    scores.querySelectorAll('[data-match]').forEach((m) => {
+      const [a, b] = m.querySelectorAll('input');
+      const row = m.closest('.match, .bm');
+      const isChanged = a.value !== a.defaultValue || b.value !== b.defaultValue;
+      const filled = a.value !== '' && b.value !== '';
+      const isDraw = isChanged && filled && a.value === b.value;
+      if (isChanged && filled && !isDraw) changed++;
+      if (isDraw) draws++;
+      row?.classList.toggle('dirty', isChanged);
+      row?.classList.toggle('draw', isDraw);
+    });
+    bar.classList.toggle('has-changes', changed + draws > 0);
+    const parts = [];
+    if (changed) parts.push(`${changed} score${changed > 1 ? 's' : ''} à enregistrer`);
+    if (draws) parts.push(`${draws} match${draws > 1 ? 's' : ''} nul${draws > 1 ? 's' : ''} : impossible`);
+    text.textContent = parts.length ? parts.join(' · ') : initialText;
+    unsaved = [...document.querySelectorAll('form[data-scores] .dirty')].length > 0;
+  };
+  scores.addEventListener('input', refresh);
+  scores.addEventListener('submit', () => { unsaved = false; });
+});
+window.addEventListener('beforeunload', (e) => {
+  if (unsaved) { e.preventDefault(); e.returnValue = ''; }
+});
+
+// Saisie des équipes en liste : compteur de lignes
+document.querySelectorAll('[data-team-list]').forEach((area) => {
+  const hint = area.form.querySelector('[data-team-count]');
+  const expected = Number(area.dataset.expected);
+  const update = () => {
+    const n = area.value.split(/\r?\n/).filter((l) => l.trim()).length;
+    hint.textContent = n > expected
+      ? `${n} lignes pour ${expected} équipes : retirez-en ${n - expected}.`
+      : `${n} / ${expected} équipes${n < expected ? ` — les ${expected - n} suivantes gardent leur nom actuel` : ' ✓'}.`;
+    hint.classList.toggle('bad', n > expected);
+  };
+  area.addEventListener('input', update);
+});

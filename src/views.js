@@ -194,12 +194,22 @@ export function newTournamentPage({ session, flash, values = {} }) {
   });
 }
 
-function scoreForm(session, t, m, a, b) {
-  return html`<form class="score-form" method="post" action="/tournois/${t.id}/matchs/${m.id}">${csrf(session)}
-    <input type="number" inputmode="numeric" name="score1" min="0" max="99" required value="${m.score1 ?? ''}" aria-label="Score de ${a}">
+// Champs de score d'un match, à placer dans un formulaire de saisie groupée (scoresForm)
+function scoreInputs(m, a, b) {
+  return html`<span class="score-form" data-match>
+    <input type="number" inputmode="numeric" name="s1_${m.id}" min="0" max="99" value="${m.score1 ?? ''}" aria-label="Score de ${a} contre ${b}">
     <span class="dash" aria-hidden="true">–</span>
-    <input type="number" inputmode="numeric" name="score2" min="0" max="99" required value="${m.score2 ?? ''}" aria-label="Score de ${b}">
-    <button aria-label="${m.score1 == null ? 'Valider' : 'Modifier'} le score ${a} contre ${b}">✓</button></form>`;
+    <input type="number" inputmode="numeric" name="s2_${m.id}" min="0" max="99" value="${m.score2 ?? ''}" aria-label="Score de ${b} contre ${a}"></span>`;
+}
+
+// Un seul formulaire pour plusieurs matchs, avec une barre d'enregistrement qui reste visible
+function scoresForm(session, t, content) {
+  return html`<form method="post" action="/tournois/${t.id}/scores" data-scores>${csrf(session)}
+    ${content}
+    <div class="savebar">
+      <span class="savebar-text" data-savebar-text>Saisissez autant de scores que vous voulez, puis enregistrez tout d'un coup.</span>
+      <button class="btn-teal">💾 Enregistrer les scores</button>
+    </div></form>`;
 }
 
 function bracketMatch(session, t, m, names) {
@@ -210,19 +220,19 @@ function bracketMatch(session, t, m, names) {
   };
   return html`<div class="bm">${side(m.team1_id, m.score1)}${side(m.team2_id, m.score2)}
     ${m.bye || !m.team1_id || !m.team2_id ? ''
-      : m.score1 == null ? scoreForm(session, t, m, names.get(m.team1_id), names.get(m.team2_id))
-      : html`<details class="edit"><summary>✏️ Corriger</summary>${scoreForm(session, t, m, names.get(m.team1_id), names.get(m.team2_id))}</details>`}</div>`;
+      : m.score1 == null ? scoreInputs(m, names.get(m.team1_id), names.get(m.team2_id))
+      : html`<details class="edit"><summary>✏️ Corriger</summary>${scoreInputs(m, names.get(m.team1_id), names.get(m.team2_id))}</details>`}</div>`;
 }
 
 function bracketView(session, t, all, names) {
   const matches = all.filter((m) => !m.third);
   const third = all.find((m) => m.third);
   const rounds = [...new Set(matches.map((m) => m.round))].sort((x, y) => x - y);
-  return html`<div class="bracket-wrap"><div class="bracket">${rounds.map((r) => {
+  return scoresForm(session, t, html`<div class="bracket-wrap"><div class="bracket">${rounds.map((r) => {
     const ms = matches.filter((m) => m.round === r).sort((x, y) => x.pos - y.pos);
     return html`<div class="col"><h3>${roundName(ms.length)}</h3><div class="col-body">${ms.map((m) => bracketMatch(session, t, m, names))}</div></div>`;
   })}</div></div>
-  ${third ? html`<div class="third"><h3>🥉 Petite finale</h3>${bracketMatch(session, t, third, names)}</div>` : ''}`;
+  ${third ? html`<div class="third"><h3>🥉 Petite finale</h3>${bracketMatch(session, t, third, names)}</div>` : ''}`);
 }
 
 export function tournamentPage({ session, flash, t, teams, matches, poolTables }) {
@@ -248,6 +258,23 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables }
   const steps = ['Inscriptions', 'Poules', 'Phases finales'];
   const tabs = [['equipes', '👥 Équipes'], ...(t.status !== 'setup' ? [['poules', '🎱 Poules']] : []),
     ...(main.length ? [['tableau', '🏆 Tableau']] : []), ...(cons.length ? [['consolante', '🤝 Consolante']] : [])];
+
+  const poolsGrid = html`<div class="grid pools-grid">${poolTables.map((p) => html`<article class="card">
+    <div class="pool-head"><span class="letter c${p.pool % 6}" aria-hidden="true">${String.fromCharCode(65 + p.pool)}</span>
+      <h3>Poule ${String.fromCharCode(65 + p.pool)}</h3></div>
+    <table><thead><tr><th>#</th><th>Équipe</th><th class="n"><abbr title="Joués">J</abbr></th><th class="n"><abbr title="Victoires">V</abbr></th><th class="n">Diff</th></tr></thead><tbody>
+      ${p.rows.map((r, i) => html`<tr class="${i < perPool ? 'q' : ''}"><td class="rank">${i + 1}</td><td class="name">${names.get(r.id)}</td>
+        <td class="n">${r.played}</td><td class="n">${r.wins}</td><td class="n">${r.diff > 0 ? '+' : ''}${r.diff}</td></tr>`)}
+    </tbody></table>
+    <h3 class="visually-hidden">Matchs de la poule ${String.fromCharCode(65 + p.pool)}</h3>
+    <ul class="matches">${p.matches.map((m) => {
+      const a = names.get(m.team1_id), b = names.get(m.team2_id);
+      return html`<li class="match ${m.score1 != null ? 'played' : ''}">
+        <span class="t ${m.winner_id === m.team1_id ? 'win' : ''}">${a}</span>
+        ${t.status === 'pools' ? scoreInputs(m, a, b) : html`<span class="final-score">${m.score1} – ${m.score2}</span>`}
+        <span class="t right ${m.winner_id === m.team2_id ? 'win' : ''}">${b}</span></li>`;
+    })}</ul>
+  </article>`)}</div>`;
 
   return layout({
     title: t.name, session, flash,
@@ -278,11 +305,18 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables }
     <section id="equipes">
       ${t.status === 'setup' ? html`<div class="card">
         <h2>👥 Les équipes</h2>
-        <p class="muted">Donnez un nom à chaque équipe, enregistrez, puis lancez le tirage au sort.</p>
-        <form method="post" action="/tournois/${t.id}/equipes">${csrf(session)}
-          <div class="form-grid">${teams.map((x, i) => html`<div><label for="team${x.id}">Équipe ${i + 1}</label>
-            <input id="team${x.id}" name="team_${x.id}" value="${x.name}" required maxlength="80"></div>`)}</div>
-          <p><button class="btn-ghost">💾 Enregistrer les noms</button></p></form>
+        <p class="muted">Saisissez ou collez la liste des ${teams.length} équipes, enregistrez, puis lancez le tirage au sort.</p>
+        <form method="post" action="/tournois/${t.id}/equipes/liste">${csrf(session)}
+          <label for="liste">Une équipe par ligne</label>
+          <textarea id="liste" name="liste" rows="${Math.min(teams.length, 16)}" spellcheck="false" data-team-list
+            data-expected="${teams.length}">${teams.map((x) => x.name).join('\n')}</textarea>
+          <p class="hint" data-team-count>La numérotation (« 1. », « 2) »…) et les puces sont retirées automatiquement.</p>
+          <p><button class="btn-ghost">💾 Enregistrer la liste</button></p></form>
+        <details class="more"><summary>✏️ Modifier une équipe à la fois</summary>
+          <form method="post" action="/tournois/${t.id}/equipes">${csrf(session)}
+            <div class="form-grid">${teams.map((x, i) => html`<div><label for="team${x.id}">Équipe ${i + 1}</label>
+              <input id="team${x.id}" name="team_${x.id}" value="${x.name}" required maxlength="80"></div>`)}</div>
+            <p><button class="btn-ghost">💾 Enregistrer les noms</button></p></form></details>
         <form method="post" action="/tournois/${t.id}/poules">${csrf(session)}
           <button class="btn-yellow btn-big">🎲 Tirer au sort les poules</button></form>
       </div>` : html`<details class="card more"><summary>👥 Les équipes (renommer)</summary>
@@ -296,22 +330,7 @@ export function tournamentPage({ session, flash, t, teams, matches, poolTables }
       <p class="legend">★ qualifié directement pour la phase finale${format.extra
         ? ` · les ${format.extra} meilleur${format.extra > 1 ? 's' : ''} ${perPool + 1}ᵉ sont repêchés`
         : format.byes ? ` · ${format.byes} exempté${format.byes > 1 ? 's' : ''} du premier tour` : ''}</p>
-      <div class="grid">${poolTables.map((p) => html`<article class="card">
-        <div class="pool-head"><span class="letter c${p.pool % 6}" aria-hidden="true">${String.fromCharCode(65 + p.pool)}</span>
-          <h3>Poule ${String.fromCharCode(65 + p.pool)}</h3></div>
-        <table><thead><tr><th>#</th><th>Équipe</th><th class="n"><abbr title="Joués">J</abbr></th><th class="n"><abbr title="Victoires">V</abbr></th><th class="n">Diff</th></tr></thead><tbody>
-          ${p.rows.map((r, i) => html`<tr class="${i < perPool ? 'q' : ''}"><td class="rank">${i + 1}</td><td class="name">${names.get(r.id)}</td>
-            <td class="n">${r.played}</td><td class="n">${r.wins}</td><td class="n">${r.diff > 0 ? '+' : ''}${r.diff}</td></tr>`)}
-        </tbody></table>
-        <h3 class="visually-hidden">Matchs de la poule ${String.fromCharCode(65 + p.pool)}</h3>
-        <ul class="matches">${p.matches.map((m) => {
-          const a = names.get(m.team1_id), b = names.get(m.team2_id);
-          return html`<li class="match ${m.score1 != null ? 'played' : ''}">
-            <span class="t ${m.winner_id === m.team1_id ? 'win' : ''}">${a}</span>
-            ${t.status === 'pools' ? scoreForm(session, t, m, a, b) : html`<span class="final-score">${m.score1} – ${m.score2}</span>`}
-            <span class="t right ${m.winner_id === m.team2_id ? 'win' : ''}">${b}</span></li>`;
-        })}</ul>
-      </article>`)}</div>
+      ${t.status === 'pools' ? scoresForm(session, t, poolsGrid) : poolsGrid}
       ${t.status === 'pools' ? html`<form class="card" method="post" action="/tournois/${t.id}/finales">${csrf(session)}
         <h3>Et après ?</h3>
         ${poolsDone ? html`<p>Toutes les poules sont terminées. Place au tableau final${t.consolante ? ' et à la consolante' : ''} !</p>`
