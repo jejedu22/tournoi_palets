@@ -16,7 +16,7 @@ Derrière un proxy HTTPS, définir `COOKIE_SECURE=1`.
 ## Déploiement (Docker + Traefik)
 
 ```bash
-echo "DOMAIN=palets.exemple.fr" > .env     # + CERT_RESOLVER (défaut : letsencrypt), TRAEFIK_NETWORK (défaut : traefik)
+cp .env.exemple .env   # puis renseigner DOMAIN (obligatoire), CERT_RESOLVER et TRAEFIK_NETWORK selon votre Traefik
 docker compose up -d --build
 ```
 
