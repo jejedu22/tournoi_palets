@@ -1,4 +1,4 @@
-# Variables (fichier .env à côté) : DOMAIN (obligatoire), CERT_RESOLVER, TRAEFIK_NETWORK
+# Variables : fichier .env à côté (modèle : .env.exemple). DOMAIN est obligatoire.
 services:
   palets:
     build: .
@@ -6,6 +6,15 @@ services:
     environment:
       TRUST_PROXY: "1"   # lit l'IP réelle dans X-Forwarded-For (limitation des essais de connexion)
       COOKIE_SECURE: "1" # cookie de session réservé au HTTPS
+      # Adresse publique (liens partagés, QR codes, e-mails de réinitialisation)
+      PUBLIC_URL: ${PUBLIC_URL:-https://${DOMAIN}}
+      # Envoi d'e-mails (mot de passe oublié) : facultatif
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-}
     volumes:
       - palets-data:/data
     networks: [traefik]

@@ -1,4 +1,4 @@
-import { scryptSync, randomBytes, timingSafeEqual } from 'node:crypto';
+import { scryptSync, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
@@ -38,4 +38,34 @@ export function getSession(db, token) {
 
 export function destroySession(db, token) {
   db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+}
+
+// ---------- Réinitialisation du mot de passe ----------
+// Seule l'empreinte du jeton est stockée : une fuite de la base ne permet pas de réinitialiser un compte.
+
+export const RESET_TTL_EMAIL_MS = 60 * 60 * 1000;        // lien envoyé par e-mail : 1 heure
+export const RESET_TTL_MANUAL_MS = 24 * 60 * 60 * 1000;  // lien transmis par le super-administrateur : 24 heures
+
+const digest = (token) => createHash('sha256').update(String(token)).digest('hex');
+
+export function createResetToken(db, userId, ttlMs) {
+  const token = randomBytes(32).toString('base64url');
+  db.prepare('DELETE FROM password_resets WHERE expires_at < ?').run(Date.now());
+  db.prepare('INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?, ?, ?)')
+    .run(digest(token), userId, Date.now() + ttlMs);
+  return token;
+}
+
+/** Utilisateur associé à un jeton valide (non expiré), ou null. */
+export function findResetUser(db, token) {
+  const row = db.prepare(`SELECT u.id, u.email, u.name FROM password_resets r JOIN users u ON u.id = r.user_id
+    WHERE r.token_hash = ? AND r.expires_at >= ?`).get(digest(token), Date.now());
+  return row ?? null;
+}
+
+/** Change le mot de passe, invalide tous les jetons et toutes les sessions du compte. */
+export function resetPassword(db, userId, password) {
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), userId);
+  db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(userId);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
 }
