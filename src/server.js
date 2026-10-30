@@ -2,10 +2,13 @@ import { createServer } from 'node:http';
 import { timingSafeEqual, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { openDb, newPublicToken } from './db.js';
-import { hashPassword, verifyPassword, createSession, getSession, destroySession } from './auth.js';
+import { hashPassword, verifyPassword, createSession, getSession, destroySession,
+  createResetToken, findResetUser, resetPassword, RESET_TTL_EMAIL_MS, RESET_TTL_MANUAL_MS } from './auth.js';
+import { sendMail, mailConfigured } from './mail.js';
 import { validateConfig, finalsFormat, tournamentFormat, drawPools, roundRobin, standings, selectQualifiers, buildBracket } from './logic.js';
 import * as v from './views.js';
 import { getStatic } from './static.js';
+import { html } from './html.js';
 import { qrSvg } from './qr.js';
 
 const DUMMY_HASH = hashPassword('dummy-password');
@@ -36,6 +39,26 @@ export function createApp(db) {
     }
     return req.socket.remoteAddress;
   };
+
+  // Limite générique : au plus `max` actions par clé (IP, e-mail…) sur la fenêtre donnée
+  const rateLimiter = (windowMs, max) => {
+    const hits = new Map();
+    return (key) => {
+      const now = Date.now();
+      if (hits.size > 5000) for (const [k, ts] of hits) if (now - ts[ts.length - 1] > windowMs) hits.delete(k);
+      const recent = (hits.get(key) || []).filter((t) => now - t < windowMs);
+      const blocked = recent.length >= max;
+      if (!blocked) recent.push(now);
+      hits.set(key, recent);
+      return blocked;
+    };
+  };
+  const resetByIp = rateLimiter(15 * 60_000, 5);
+  const resetByEmail = rateLimiter(60 * 60_000, 3);
+
+  // Le lien envoyé par e-mail est construit uniquement à partir de PUBLIC_URL, jamais de l'en-tête Host :
+  // sinon un attaquant pourrait faire envoyer à sa victime un lien vers son propre site et voler le jeton.
+  const resetByEmailEnabled = () => mailConfigured() && Boolean(process.env.PUBLIC_URL);
 
   const hasUsers = () => db.prepare('SELECT 1 FROM users LIMIT 1').get() !== undefined;
   const redirect = (res, to, extra = {}) => {
@@ -96,7 +119,76 @@ export function createApp(db) {
       title: 'Connexion', action: '/login', submit: 'Se connecter', flash: flashOf(url),
       fields: [{ name: 'email', label: 'E-mail', type: 'email', autocomplete: 'username' },
         { name: 'password', label: 'Mot de passe', type: 'password', autocomplete: 'current-password' }],
+      footer: html`<p class="auth-links"><a href="/mot-de-passe-oublie">Mot de passe oublié ?</a></p>`,
     }));
+  });
+
+  // ---------- Mot de passe oublié ----------
+  route('GET', '/mot-de-passe-oublie', null, ({ res, session }) => {
+    if (session) return redirect(res, '/');
+    if (!resetByEmailEnabled()) {
+      return send(res, 200, v.messagePage({ title: 'Mot de passe oublié',
+        message: "L'envoi d'e-mails n'est pas configuré sur ce serveur. Demandez au super-administrateur de l'application de vous créer un lien de réinitialisation." }));
+    }
+    send(res, 200, v.authPage({
+      title: 'Mot de passe oublié', action: '/mot-de-passe-oublie', submit: 'Recevoir un lien',
+      intro: 'Indiquez l\'adresse e-mail de votre compte : vous recevrez un lien pour choisir un nouveau mot de passe.',
+      fields: [{ name: 'email', label: 'E-mail', type: 'email', autocomplete: 'username' }],
+      footer: html`<p class="auth-links"><a href="/login">Retour à la connexion</a></p>`,
+    }));
+  });
+
+  route('POST', '/mot-de-passe-oublie', null, ({ req, res, body }) => {
+    if (!resetByEmailEnabled()) return redirect(res, '/mot-de-passe-oublie');
+    if (resetByIp(clientIp(req))) {
+      return send(res, 429, v.messagePage({ title: 'Trop de demandes', message: 'Trop de demandes depuis cette connexion. Réessayez dans quelques minutes.' }));
+    }
+    const email = String(body.email || '').trim().toLowerCase();
+    const user = email && !resetByEmail(email) ? db.prepare('SELECT id, name, email FROM users WHERE email = ?').get(email) : null;
+    if (user) {
+      const link = `${process.env.PUBLIC_URL.replace(/\/$/, '')}/reinitialiser/${createResetToken(db, user.id, RESET_TTL_EMAIL_MS)}`;
+      // Envoi en arrière-plan : la réponse est identique et immédiate, que le compte existe ou non
+      sendMail({
+        to: user.email,
+        subject: 'Réinitialisation de votre mot de passe – Palets Bretons',
+        text: `Bonjour ${user.name},\n\nUne réinitialisation du mot de passe de votre compte Palets Bretons (${user.email}) a été demandée.\n\n`
+          + `Pour choisir un nouveau mot de passe, ouvrez ce lien (valable 1 heure, utilisable une seule fois) :\n${link}\n\n`
+          + "Si vous n'êtes pas à l'origine de cette demande, ignorez ce message : votre mot de passe actuel reste valable.\n",
+      }).catch((err) => console.error(`Envoi de l'e-mail de réinitialisation impossible : ${err.message}`));
+    }
+    send(res, 200, v.messagePage({ title: 'Vérifiez vos e-mails',
+      message: 'Si un compte correspond à cette adresse, un e-mail contenant un lien de réinitialisation vient d\'être envoyé. Le lien est valable 1 heure. Pensez à regarder dans les courriers indésirables.' }));
+  });
+
+  const invalidReset = (res) => send(res, 410, v.messagePage({ title: 'Lien invalide ou expiré',
+    message: 'Ce lien de réinitialisation a expiré ou a déjà été utilisé.', action: { href: '/mot-de-passe-oublie', label: 'Demander un nouveau lien' } }));
+
+  route('GET', '/reinitialiser/:token', null, ({ res, url, session, params }) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    const user = findResetUser(db, params.token);
+    if (!user) return invalidReset(res);
+    send(res, 200, v.authPage({
+      title: 'Nouveau mot de passe', action: `/reinitialiser/${params.token}`, submit: 'Enregistrer le mot de passe',
+      intro: `Compte : ${user.email}`, csrfToken: session?.csrf, flash: flashOf(url),
+      fields: [
+        { name: 'password', label: 'Nouveau mot de passe (8 caractères min.)', type: 'password', autocomplete: 'new-password', attrs: 'required minlength="8"' },
+        { name: 'confirm', label: 'Confirmez le mot de passe', type: 'password', autocomplete: 'new-password', attrs: 'required minlength="8"' },
+      ],
+    }));
+  });
+
+  route('POST', '/reinitialiser/:token', null, ({ res, params, body }) => {
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    const user = findResetUser(db, params.token);
+    if (!user) return invalidReset(res);
+    const path = `/reinitialiser/${params.token}`;
+    const password = String(body.password || '');
+    if (password.length < 8) return back(res, path, 'err', 'Le mot de passe doit contenir au moins 8 caractères.');
+    if (password !== body.confirm) return back(res, path, 'err', 'Les deux mots de passe ne correspondent pas.');
+    resetPassword(db, user.id, password);
+    redirect(res, `/login?ok=${encodeURIComponent('Mot de passe modifié. Vous pouvez vous connecter.')}`,
+      { 'Set-Cookie': 'sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0' });
   });
   route('POST', '/login', null, ({ req, res, body, secure }) => {
     const ip = clientIp(req);
@@ -151,6 +243,17 @@ export function createApp(db) {
       back(res, path, 'ok', 'Administrateur ajouté.');
     } catch { back(res, path, 'err', 'Cet e-mail est déjà utilisé.'); }
   });
+  // Lien de réinitialisation à transmettre soi-même (sans envoi d'e-mail)
+  route('POST', '/associations/:id/admins/:uid/lien', 'superadmin', ({ req, res, session, params, secure }) => {
+    const association = loadAssociation(params.id);
+    const user = association && db.prepare("SELECT id, name, email FROM users WHERE id = ? AND association_id = ? AND role = 'admin'")
+      .get(Number(params.uid), association.id);
+    if (!user) return notFound(res, session);
+    const base = process.env.PUBLIC_URL?.replace(/\/$/, '') || `${secure ? 'https' : 'http'}://${req.headers.host}`;
+    res.setHeader('Cache-Control', 'no-store');
+    send(res, 200, v.resetLinkPage({ session, association, user, link: `${base}/reinitialiser/${createResetToken(db, user.id, RESET_TTL_MANUAL_MS)}` }));
+  });
+
   route('POST', '/associations/:id/admins/:uid/supprimer', 'superadmin', ({ res, params }) => {
     db.prepare("DELETE FROM users WHERE id = ? AND association_id = ? AND role = 'admin'").run(Number(params.uid), Number(params.id));
     back(res, `/associations/${params.id}`, 'ok', 'Administrateur supprimé.');

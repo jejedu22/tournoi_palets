@@ -30,6 +30,19 @@ docker compose up -d --build
 - Au premier accès, ouvrir `https://<DOMAIN>/setup` pour créer le super-administrateur : faites-le tout de suite,
   la page est publique tant qu'aucun compte n'existe.
 
+## Mot de passe oublié
+
+- **Par e-mail** : si un serveur SMTP est configuré (variables `SMTP_*` et `MAIL_FROM`, voir `.env.exemple`), l'écran
+  de connexion propose « Mot de passe oublié ? ». Un lien valable 1 heure et utilisable une seule fois est envoyé ;
+  la réponse est identique que l'adresse existe ou non, et les demandes sont limitées. Le lien est toujours construit
+  à partir de `PUBLIC_URL`, jamais de l'en-tête `Host` de la requête.
+- **Sans e-mail** : le super-administrateur crée un lien (valable 24 heures) depuis la page de l'association, bouton
+  « Réinitialiser le mot de passe », et le transmet lui-même.
+- **Super-administrateur** : en cas d'oubli, un lien s'obtient sur le serveur :
+  `docker compose exec palets node src/cli.js lien-reinitialisation <e-mail>`.
+
+Une réinitialisation ferme toutes les sessions ouvertes du compte. Seule l'empreinte des jetons est stockée en base.
+
 ## Résultats en direct pour les joueurs
 
 Chaque tournoi a une page publique en lecture seule (`/r/<jeton>`), sans compte : poules, tableaux, consolante

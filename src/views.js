@@ -67,16 +67,46 @@ export function errorPage({ session, status, title, message }) {
   });
 }
 
-export function authPage({ title, intro, action, fields, submit, flash }) {
+export function authPage({ title, intro, action, fields, submit, flash, footer, csrfToken }) {
   return layout({
     title, flash, session: null,
     body: html`<div class="narrow-wrap"><section class="card auth">
       <h1>${title}</h1>${intro ? html`<p class="muted">${intro}</p>` : ''}
       <form method="post" action="${action}">
+        ${csrfToken ? html`<input type="hidden" name="_csrf" value="${csrfToken}">` : ''}
         ${fields.map((f) => html`<label for="${f.name}">${f.label}</label>
           <input id="${f.name}" name="${f.name}" type="${f.type || 'text'}" autocomplete="${f.autocomplete || 'on'}" ${raw(f.attrs || 'required')}>`)}
         <p><button class="btn-big">${submit}</button></p>
-      </form></section></div>`,
+      </form>${footer ?? ''}</section></div>`,
+  });
+}
+
+// Page de message simple (confirmation, lien invalide…), dans le même gabarit que la connexion
+export function messagePage({ title, message, action }) {
+  return layout({
+    title, session: null,
+    body: html`<div class="narrow-wrap"><section class="card auth">
+      <h1>${title}</h1><p>${message}</p>
+      ${action ? html`<p><a class="btn" href="${action.href}">${action.label}</a></p>` : ''}
+      <p class="auth-links"><a href="/login">Retour à la connexion</a></p></section></div>`,
+  });
+}
+
+// Lien de réinitialisation créé par le super-administrateur, à transmettre à la personne
+export function resetLinkPage({ session, association, user, link }) {
+  return layout({
+    title: 'Lien de réinitialisation', session,
+    body: html`<a class="back" href="/associations/${association.id}">← ${association.name}</a>
+    <section class="card">
+      <h1>Lien de réinitialisation</h1>
+      <p>Transmettez ce lien à <strong>${user.name}</strong> (${user.email}). Il permet de choisir un nouveau mot de passe,
+        est valable <strong>24 heures</strong> et ne fonctionne qu'une seule fois.</p>
+      <div class="copy-row">
+        <input id="reset-link" readonly value="${link}" aria-label="Lien de réinitialisation">
+        <button type="button" data-copy="#reset-link">Copier</button>
+      </div>
+      <p class="hint">Ce lien ne sera plus affiché : copiez-le maintenant. Le mot de passe actuel reste valable tant qu'il n'est pas utilisé.</p>
+    </section>`,
   });
 }
 
@@ -115,6 +145,8 @@ export function associationPage({ session, flash, association, admins }) {
         ${admins.length ? html`<ul class="people">${admins.map((u) => html`<li>
           <span class="avatar" aria-hidden="true">${initial(u.name)}</span>
           <span class="grow"><strong>${u.name}</strong><br><span class="muted">${u.email}</span></span>
+          <form method="post" action="/associations/${association.id}/admins/${u.id}/lien">${csrf(session)}
+            <button class="btn-ghost btn-sm" aria-label="Créer un lien de réinitialisation du mot de passe de ${u.name}">Réinitialiser le mot de passe</button></form>
           <form method="post" action="/associations/${association.id}/admins/${u.id}/supprimer" data-confirm="Supprimer l'administrateur ${u.name} ?">${csrf(session)}
             <button class="btn-danger btn-sm" aria-label="Supprimer ${u.name}">Supprimer</button></form></li>`)}</ul>`
           : html`<p class="muted">Aucun administrateur : ajoutez-en un pour que l'association puisse créer ses tournois.</p>`}

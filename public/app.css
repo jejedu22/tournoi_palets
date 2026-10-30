@@ -372,3 +372,9 @@ body.only-mine .match:not(.mine) { display: none; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---------- Connexion, mot de passe oublié ---------- */
+.auth-links { margin: .4rem 0 0; font-size: .92rem; text-align: center; }
+.people li { flex-wrap: wrap; }
+.people .grow { flex: 1 1 12rem; }
+.people li form { margin: 0; }
