@@ -53,7 +53,7 @@ export function createApp(db) {
     return ok ? { type: 'ok', message: ok } : err ? { type: 'err', message: err } : null;
   };
   const notFound = (res, session) =>
-    send(res, 404, v.errorPage({ session, status: 404, title: 'Page introuvable', message: "Ce palet est tombé à côté de la planche." }));
+    send(res, 404, v.errorPage({ session, status: 404, title: 'Page introuvable', message: "Cette page n'existe pas ou a été déplacée." }));
 
   const tx = (fn) => {
     db.exec('BEGIN');
@@ -511,7 +511,7 @@ export function createApp(db) {
       notFound(res, session);
     } catch (err) {
       console.error(err);
-      if (!res.headersSent) send(res, 500, v.errorPage({ status: 500, title: 'Erreur interne', message: 'Quelque chose a coincé, réessayez dans un instant.' }));
+      if (!res.headersSent) send(res, 500, v.errorPage({ status: 500, title: 'Erreur interne', message: 'Une erreur est survenue, réessayez dans un instant.' }));
     }
   };
 }
